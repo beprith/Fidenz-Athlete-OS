@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  athleteos:
+    build: .
+    ports:
+      - "7860:7860"
+    environment:
+      - API_BASE_URL=${API_BASE_URL:-https://api.openai.com/v1}
+      - MODEL_NAME=${MODEL_NAME:-gpt-4o-mini}
+      - HF_TOKEN=${HF_TOKEN:-sk-placeholder}
+      - PYTHONPATH=/app
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

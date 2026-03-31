@@ -1,0 +1,58 @@
+name: fidenz-athlete-os
+version: "0.1.0"
+description: >
+  Multi-sport player simulation platform. Recruits a player persona from
+  seed data, runs RL-based performance simulations across team contexts,
+  and grades fit with deterministic task graders.
+author: fidenz-labs
+tags:
+  - openenv
+  - sports
+  - recruitment
+  - reinforcement-learning
+  - graphrag
+  - multi-agent
+
+tasks:
+  - id: single_player_stat_prediction
+    name: "Single Player Season Stat Prediction"
+    difficulty: easy
+    description: >
+      Given a player's career stats CSV and a target season context,
+      predict whether their key metric (goals, assists, PPG, ERA, etc.)
+      will be above or below their career mean. Grader scores on accuracy
+      and confidence calibration.
+    max_steps: 10
+
+  - id: player_team_fit_analysis
+    name: "Player-Team Tactical Fit Analysis"
+    difficulty: medium
+    description: >
+      Given a player persona and a target team's playing style (formation,
+      pace, press intensity), simulate 5 match rounds and score the player's
+      performance contribution. Grader checks for coherent tactical reasoning
+      and output metrics within statistically plausible bounds.
+    max_steps: 20
+
+  - id: full_squad_recruitment_sim
+    name: "Full Squad Recruitment Simulation"
+    difficulty: hard
+    description: >
+      Given a squad of 11 players with individual personas and a 10-match
+      season schedule with varying opposition strengths, simulate the full
+      season. The grader scores cumulative squad performance, individual
+      player utilization, fatigue/injury management, and tactical adaptation
+      across matches.
+    max_steps: 50
+
+reward:
+  type: shaped
+  range: [0.0, 1.0]
+  description: >
+    Bounded sigmoid reward with partial credit per step.
+    KL-divergence penalty prevents persona drift from seed baseline.
+
+env_vars:
+  - API_BASE_URL
+  - MODEL_NAME
+  - HF_TOKEN
