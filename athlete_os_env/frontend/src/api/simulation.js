@@ -10,9 +10,15 @@ export async function getPlayers() {
   return data.players
 }
 
-export async function getTeams() {
-  const { data } = await api.get('/api/teams')
+export async function getTeams(sport = null) {
+  const params = sport ? { sport } : {}
+  const { data } = await api.get('/api/teams', { params })
   return data.teams
+}
+
+export async function getCompatibleTeams(playerId) {
+  const { data } = await api.get(`/api/compatible-teams/${playerId}`)
+  return data
 }
 
 export async function getGraph() {

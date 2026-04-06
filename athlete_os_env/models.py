@@ -97,6 +97,7 @@ class PlayerPersona(BaseModel):
 
     player_id: str = ""
     name: str = ""
+    sport: str = ""
     position: str = ""
     nationality: str = ""
     age: int = 0

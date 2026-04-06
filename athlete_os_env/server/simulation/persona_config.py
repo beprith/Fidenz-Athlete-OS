@@ -1,5 +1,6 @@
 """
 Translates PlayerPersona into SimConfig parameters for the event engine.
+Sport-aware: fatigue baselines vary by sport and position.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ class SimConfig:
     """Configuration that drives a single simulation context."""
 
     player_id: str = ""
+    sport: str = "soccer"
     team: str = "Unknown"
     formation: str = "4-3-3"
     role: str = "CM"
@@ -30,6 +32,22 @@ class SimConfig:
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
+POSITION_FATIGUE = {
+    "soccer": {
+        "GK": 0.02, "CB": 0.05, "LB": 0.08, "RB": 0.08,
+        "CM": 0.07, "CDM": 0.06, "CAM": 0.07,
+        "LW": 0.09, "RW": 0.09, "CF": 0.08, "ST": 0.07,
+    },
+    "basketball": {
+        "PG": 0.08, "SG": 0.08, "SF": 0.07, "PF": 0.06, "C": 0.05,
+    },
+    "cricket": {
+        "Batsman": 0.04, "Bowler": 0.07, "All-Rounder": 0.06,
+        "Wicket-Keeper": 0.05, "Opener": 0.04, "Spinner": 0.06,
+    },
+}
+
+
 def persona_to_sim_config(
     persona: PlayerPersona,
     target_context: Dict[str, Any],
@@ -38,20 +56,17 @@ def persona_to_sim_config(
     """Build a SimConfig from a persona + target context + optional overrides."""
     params = sim_params or {}
     pv = persona.trait_vector()
+    sport = persona.sport or "soccer"
 
-    # Position-based fatigue baseline
-    position_fatigue = {
-        "GK": 0.02, "CB": 0.05, "LB": 0.08, "RB": 0.08,
-        "CM": 0.07, "CDM": 0.06, "CAM": 0.07,
-        "LW": 0.09, "RW": 0.09, "CF": 0.08, "ST": 0.07,
-    }
     role = target_context.get("role", persona.position)
-    base_fatigue = position_fatigue.get(role, 0.06)
+    fatigue_table = POSITION_FATIGUE.get(sport, POSITION_FATIGUE["soccer"])
+    base_fatigue = fatigue_table.get(role, 0.06)
     stamina_factor = max(0.01, 1.0 - persona.stamina)
     fatigue = base_fatigue * stamina_factor
 
     return SimConfig(
         player_id=persona.player_id,
+        sport=sport,
         team=target_context.get("team", "Unknown"),
         formation=target_context.get("formation", "4-3-3"),
         role=role,

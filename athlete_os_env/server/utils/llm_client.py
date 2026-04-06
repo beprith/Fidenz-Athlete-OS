@@ -28,7 +28,10 @@ class LLMClient:
     ):
         self.api_base_url = api_base_url or os.getenv("API_BASE_URL", "https://api.openai.com/v1")
         self.model_name = model_name or os.getenv("MODEL_NAME", "gpt-4o-mini")
-        api_key = api_key or os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or "sk-placeholder"
+        api_key = api_key or os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            log.warning("No API key found in HF_TOKEN or OPENAI_API_KEY env vars — LLM calls will fail")
+            api_key = "sk-not-configured"
         self._client = OpenAI(api_key=api_key, base_url=self.api_base_url)
 
     @retry(max_retries=3, base_delay=1.0, exceptions=(Exception,))

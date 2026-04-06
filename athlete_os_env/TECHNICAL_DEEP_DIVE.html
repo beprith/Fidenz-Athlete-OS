@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fidenz Athlete OS — Technical Deep Dive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]});">
+</script>
+<style>
+:root {
+  --bg: #0b0f1a;
+  --surface: #111827;
+  --surface2: #1e293b;
+  --border: #334155;
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --accent: #3b82f6;
+  --accent2: #8b5cf6;
+  --green: #10b981;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+  font-size: 16px;
+}
+.container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+/* Hero */
+.hero {
+  padding: 80px 0 60px;
+  text-align: center;
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+  border-bottom: 1px solid var(--border);
+}
+.hero h1 {
+  font-size: 2.8rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), var(--accent2), var(--cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 12px;
+}
+.hero .subtitle {
+  font-size: 1.15rem;
+  color: var(--text-muted);
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* TOC */
+.toc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px 32px;
+  margin: 40px auto;
+  max-width: 640px;
+}
+.toc h2 { font-size: 1.1rem; color: var(--accent); margin-bottom: 14px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
+.toc ol { padding-left: 20px; }
+.toc li { margin: 6px 0; }
+.toc a { color: var(--text); text-decoration: none; border-bottom: 1px dashed var(--border); transition: color 0.2s; }
+.toc a:hover { color: var(--accent); border-color: var(--accent); }
+
+/* Sections */
+section { padding: 56px 0; border-bottom: 1px solid var(--border); }
+section:last-of-type { border-bottom: none; }
+h2 {
+  font-size: 1.9rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+h2 .num { color: var(--accent); margin-right: 8px; }
+h3 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin: 32px 0 12px;
+  color: var(--cyan);
+}
+h4 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 20px 0 8px;
+  color: var(--accent2);
+}
+p { margin: 10px 0; color: var(--text-muted); }
+p strong { color: var(--text); }
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  margin: 20px 0;
+}
+.card.highlight { border-left: 4px solid var(--accent); }
+.card.math { border-left: 4px solid var(--accent2); background: #1a1040; }
+.card.green { border-left: 4px solid var(--green); }
+.card.amber { border-left: 4px solid var(--amber); }
+
+/* Code */
+code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.88em;
+  background: var(--surface2);
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: var(--cyan);
+}
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px 22px;
+  overflow-x: auto;
+  margin: 14px 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 0.92rem;
+}
+th, td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+th { color: var(--accent); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; }
+td { color: var(--text-muted); }
+
+/* Diagram */
+.diagram {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  margin: 20px 0;
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  line-height: 2;
+  color: var(--text-muted);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* Flow arrows */
+.flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+.flow-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+.flow-arrow { color: var(--accent); font-weight: bold; }
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.badge.easy { background: #064e3b; color: var(--green); }
+.badge.medium { background: #78350f; color: var(--amber); }
+.badge.hard { background: #7f1d1d; color: var(--red); }
+
+/* KaTeX overrides */
+.katex { color: var(--text) !important; }
+.katex-display { margin: 16px 0 !important; overflow-x: auto; }
+
+/* Footer */
+footer { padding: 40px 0; text-align: center; color: var(--text-muted); font-size: 0.85rem; border-top: 1px solid var(--border); }
+footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<!-- ============================== HERO ============================== -->
+<header class="hero">
+  <div class="container">
+    <h1>Fidenz Athlete OS</h1>
+    <p class="subtitle">A technical deep dive into the mathematics, algorithms, and architecture behind a multi-sport player simulation platform built on the OpenEnv framework.</p>
+  </div>
+</header>
+
+<!-- ============================== TOC ============================== -->
+<div class="container">
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#s1">System Architecture Overview</a></li>
+    <li><a href="#s2">16-Dimensional Persona Model</a></li>
+    <li><a href="#s3">Reinforcement Learning Engine</a></li>
+    <li><a href="#s4">Reward Shaping &amp; Bounded Sigmoid</a></li>
+    <li><a href="#s5">KL-Divergence Constraint &amp; Adaptive Beta</a></li>
+    <li><a href="#s6">Proximal Policy Optimization (PPO)</a></li>
+    <li><a href="#s7">Experience Replay &amp; GAE Advantages</a></li>
+    <li><a href="#s8">GraphRAG Knowledge Layer</a></li>
+    <li><a href="#s9">Match Simulation Engine</a></li>
+    <li><a href="#s10">Task Grading System</a></li>
+    <li><a href="#s11">Multi-Agent Swarm Orchestration</a></li>
+    <li><a href="#s12">OpenEnv Compliance &amp; API Contract</a></li>
+  </ol>
+</nav>
+
+
+<!-- ============================== SECTION 1 ============================== -->
+<section id="s1">
+<h2><span class="num">01</span>System Architecture Overview</h2>
+<p>Fidenz Athlete OS is a complete reinforcement learning environment that simulates professional athletes as AI personas. An external agent interacts via the standard OpenEnv <code>reset()</code> / <code>step(action)</code> / <code>state</code> API, receiving observations and shaped rewards.</p>
+
+<div class="diagram">
+┌────────────────────────────────────────────────────────────────────────────┐
+│                           OpenEnv API Layer                                │
+│   POST /reset  →  AthleteObservation     POST /step  →  AthleteObservation │
+│   GET  /state  →  AthleteState           GET  /health →  HealthResponse    │
+└─────────────────────┬──────────────────────────────────┬───────────────────┘
+                      │                                  │
+              ┌───────▼───────┐                  ┌───────▼───────┐
+              │  Orchestrator  │◄────────────────►│  RL Engine    │
+              │  (Router)      │                  │  PPO + KL     │
+              └──┬──┬──┬──┬───┘                  └───────────────┘
+                 │  │  │  │
+     ┌───────┐ ┌▼┐┌▼┐┌▼┐┌▼───────┐
+     │Ontology│ │P││S││G││ Report │
+     │ Agent  │ │e││i││r││ Agent  │
+     │        │ │r││m││a││        │
+     │        │ │s││R││d││        │
+     │        │ │o││u││e││        │
+     │        │ │n││n││r││        │
+     │        │ │a││.│└┬┘│        │
+     └────────┘ └─┘└─┘ │ └────────┘
+                        │
+              ┌─────────▼─────────┐
+              │  In-Memory Graph   │
+              │  (Property Graph   │
+              │   + Vector Search) │
+              └────────────────────┘
+</div>
+
+<p>The data flows through <strong>six specialized agents</strong> coordinated by a central <strong>Orchestrator</strong> using a shared blackboard pattern. The RL engine (PPO + KL constraint) shapes the reward signal and gently adjusts persona traits across simulation steps.</p>
+</section>
+
+
+<!-- ============================== SECTION 2 ============================== -->
+<section id="s2">
+<h2><span class="num">02</span>16-Dimensional Persona Model</h2>
+<p>Each athlete is represented as a <strong>behavioral persona</strong> encoded in a 16-dimensional trait vector. This compact representation captures the full behavioral fingerprint of a player.</p>
+
+<table>
+<thead><tr><th>Index</th><th>Trait</th><th>Category</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Speed</td><td>Physical</td><td>Acceleration, sprint pace, off-the-ball movement</td></tr>
+<tr><td>1</td><td>Stamina</td><td>Physical</td><td>Endurance, recovery rate, minutes capacity</td></tr>
+<tr><td>2</td><td>Positioning</td><td>Tactical</td><td>Spatial awareness, reading the game</td></tr>
+<tr><td>3</td><td>Technical</td><td>Skill</td><td>Ball control, first touch, passing accuracy</td></tr>
+<tr><td>4</td><td>Aerial</td><td>Physical</td><td>Heading, jumping, aerial duels won</td></tr>
+<tr><td>5</td><td>Decision Speed</td><td>Cognitive</td><td>Reaction time, quick thinking under pressure</td></tr>
+<tr><td>6</td><td>Pressure Tolerance</td><td>Mental</td><td>Composure in high-stakes situations</td></tr>
+<tr><td>7</td><td>Creativity</td><td>Cognitive</td><td>Vision, unexpected plays, throughballs</td></tr>
+<tr><td>8</td><td>Work Rate</td><td>Physical</td><td>Defensive tracking, pressing intensity</td></tr>
+<tr><td>9</td><td>Leadership</td><td>Mental</td><td>Team coordination, vocal presence</td></tr>
+<tr><td>10</td><td>Consistency</td><td>Mental</td><td>Performance stability across matches</td></tr>
+<tr><td>11</td><td>Injury Resilience</td><td>Physical</td><td>Resistance to fatigue-induced injuries</td></tr>
+<tr><td>12</td><td>Form Momentum</td><td>Mental</td><td>Ability to carry good form forward</td></tr>
+<tr><td>13</td><td>Big Game Performance</td><td>Mental</td><td>Clutch factor in decisive matches</td></tr>
+<tr><td>14</td><td>Adaptability</td><td>Cognitive</td><td>Adjusting to new tactics or positions</td></tr>
+<tr><td>15</td><td>Teamwork</td><td>Social</td><td>Chemistry, passing networks, communication</td></tr>
+</tbody>
+</table>
+
+<div class="card math">
+<p>The trait vector $\mathbf{t} \in \mathbb{R}^{16}$ is normalized to the probability simplex for policy operations:</p>
+$$\pi(\mathbf{t})_i = \frac{e^{t_i}}{\sum_{j=1}^{16} e^{t_j}} \quad \text{(softmax normalization)}$$
+<p>This ensures trait weights sum to 1 and can be interpreted as a probability distribution over behavioral dimensions.</p>
+</div>
+</section>
+
+
+<!-- ============================== SECTION 3 ============================== -->
+<section id="s3">
+<h2><span class="num">03</span>Reinforcement Learning Engine</h2>
+<p>The RL engine operates on a <strong>lightweight, non-neural</strong> architecture designed to run within the 2vCPU / 8GB memory constraint of Hugging Face Spaces. Instead of training a deep network, it directly optimizes the 16-dimensional persona weight vector.</p>
+
+<div class="card highlight">
+<h4>Key Design Principle</h4>
+<p>Traditional RL uses neural networks to learn a policy $\pi_\theta(a|s)$. Our approach replaces the network with a <strong>logit vector</strong> $\mathbf{z} \in \mathbb{R}^{16}$ whose softmax gives trait weights. This is mathematically equivalent to a single-layer softmax policy over a fixed-dimensional action space.</p>
+</div>
+
+<h3>Component Stack</h3>
+<div class="flow">
+  <div class="flow-box">Reward Engine</div>
+  <span class="flow-arrow">→</span>
+  <div class="flow-box">KL Constraint</div>
+  <span class="flow-arrow">→</span>
+  <div class="flow-box">PPO Policy</div>
+  <span class="flow-arrow">→</span>
+  <div class="flow-box">Experience Replay</div>
+</div>
+
+<p>Each step produces a <strong>shaped reward</strong> $r_t$, which is then penalized by the KL-divergence from a frozen baseline persona. The PPO policy adjusts trait logits every 5 steps using a clipped surrogate objective. The experience replay buffer stores transitions for off-policy advantage estimation.</p>
+</section>
+
+
+<!-- ============================== SECTION 4 ============================== -->
+<section id="s4">
+<h2><span class="num">04</span>Reward Shaping &amp; Bounded Sigmoid</h2>
+<p>The reward signal provides <strong>partial credit per step</strong>, not just a sparse terminal score. It combines four weighted components passed through a bounded sigmoid.</p>
+
+<h3>4.1 Weighted Component Score</h3>
+<div class="card math">
+$$R_{\text{raw}} = 0.40 \cdot S_{\text{output}} + 0.30 \cdot S_{\text{tactical}} + 0.20 \cdot S_{\text{coherence}} + 0.10 \cdot S_{\text{efficiency}}$$
+</div>
+
+<table>
+<thead><tr><th>Component</th><th>Weight</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>Output Score</td><td>40%</td><td>Goals, assists, key contributions normalized by rounds played</td></tr>
+<tr><td>Tactical Fit</td><td>30%</td><td>Player rating divided by 10.0 (capped at 1.0)</td></tr>
+<tr><td>Coherence Score</td><td>20%</td><td>Diversity of event types; penalizes monotonic outputs</td></tr>
+<tr><td>Step Efficiency</td><td>10%</td><td>Inversely proportional to wasted simulation rounds</td></tr>
+</tbody>
+</table>
+
+<h3>4.2 Penalty Terms</h3>
+<p>Two penalties are applied before the sigmoid to penalize undesirable agent behavior:</p>
+<ul style="margin-left: 20px; color: var(--text-muted);">
+  <li><strong>Hallucination Penalty</strong>: $P_h = -0.3$ when implausible stats are detected</li>
+  <li><strong>Repeat Penalty</strong>: $P_r = -0.2$ when the same action type is repeated 3+ consecutive times</li>
+</ul>
+
+<h3>4.3 Bounded Sigmoid</h3>
+<div class="card math">
+$$R_{\text{shaped}} = \sigma\!\left(R_{\text{raw}} + P_h + P_r\right) = \frac{1}{1 + e^{-k(x - m)}}$$
+<p>with steepness $k = 6.0$ and midpoint $m = 0.5$. The output is clipped to $[0, 1]$.</p>
+<p>The sigmoid ensures rewards are <strong>bounded</strong> and provides a smooth gradient around the midpoint. Small changes in performance near the middle range produce meaningful reward differences, while extreme scores are compressed.</p>
+</div>
+
+<h3>4.4 Final Shaped Reward</h3>
+<div class="card math">
+$$r_t = \max\!\left(0,\; R_{\text{shaped}} - \beta \cdot D_{\text{KL}}\!\left(\pi_t \| \pi_0\right)\right)$$
+<p>The KL penalty (Section 5) is subtracted from the shaped reward to prevent persona drift, and the result is floored at zero.</p>
+</div>
+</section>
+
+
+<!-- ============================== SECTION 5 ============================== -->
+<section id="s5">
+<h2><span class="num">05</span>KL-Divergence Constraint &amp; Adaptive Beta</h2>
+<p>To prevent the RL engine from drifting the persona too far from the player's true behavioral profile, a KL-divergence penalty is computed at every step.</p>
+
+<h3>5.1 KL Divergence Computation</h3>
+<div class="card math">
+<p>Given current persona distribution $\pi_t$ and frozen baseline $\pi_0$ (both normalized to the 16-dim simplex):</p>
+$$D_{\text{KL}}(\pi_t \| \pi_0) = \sum_{i=1}^{16} \pi_t^{(i)} \ln\!\frac{\pi_t^{(i)}}{\pi_0^{(i)}}$$
+<p>The penalty applied to the reward is $\beta \cdot D_{\text{KL}}$, where $\beta$ is the adaptive coefficient.</p>
+</div>
+
+<h3>5.2 Adaptive Beta Scheduling</h3>
+<p>The coefficient $\beta$ adapts over time based on a rolling 5-step window of KL values:</p>
+
+<div class="card amber">
+<pre>avg_drift = mean(last 5 KL values)
+
+if avg_drift > 0.3:   β ← min(β × 1.5, β_max)     # drift too high → increase penalty
+if avg_drift < 0.05:  β ← max(β × 0.8, 0.01)       # drift negligible → relax penalty</pre>
+<p><strong>Initialization</strong>: $\beta_0 = 0.1$, $\beta_{\max} = 1.0$</p>
+</div>
+
+<p>This creates a <strong>self-regulating feedback loop</strong>: if the PPO policy pushes traits too far from baseline, the penalty automatically increases, forcing the policy back. If traits stay close to the original persona, the penalty relaxes to allow beneficial adaptations.</p>
+</section>
+
+
+<!-- ============================== SECTION 6 ============================== -->
+<section id="s6">
+<h2><span class="num">06</span>Proximal Policy Optimization (PPO)</h2>
+<p>The PPO module applies a lightweight variant of the Proximal Policy Optimization algorithm directly on the persona logit vector &mdash; no neural network required.</p>
+
+<h3>6.1 Policy Representation</h3>
+<div class="card math">
+<p>The policy is a <strong>softmax over logits</strong>:</p>
+$$\pi(\mathbf{z})_i = \frac{e^{z_i}}{\sum_{j=1}^{16} e^{z_j}}, \quad \mathbf{z} \in \mathbb{R}^{16}$$
+<p>When initialized from a persona trait vector $\mathbf{t}$, the logits are computed as:</p>
+$$z_i = \ln\!\left(\frac{t_i}{\sum_j t_j} + \epsilon\right), \quad \epsilon = 10^{-8}$$
+</div>
+
+<h3>6.2 Clipped Surrogate Objective</h3>
+<div class="card math">
+<p>Given the ratio of new to old probabilities:</p>
+$$r_i = \frac{\pi_{\text{new}}^{(i)}}{\pi_{\text{old}}^{(i)} + \epsilon}$$
+<p>The clipped surrogate loss is:</p>
+$$L^{\text{CLIP}} = -\frac{1}{16} \sum_{i=1}^{16} \min\!\left(r_i \cdot A_i,\; \text{clip}(r_i, 1{-}\varepsilon, 1{+}\varepsilon) \cdot A_i\right)$$
+<p>with clip range $\varepsilon = 0.2$ and advantages $A_i$ broadcast from the batch mean advantage.</p>
+</div>
+
+<h3>6.3 Entropy Bonus</h3>
+<div class="card math">
+<p>An entropy term prevents premature convergence to a single dominant trait:</p>
+$$H(\pi) = -\sum_{i=1}^{16} \pi_i \ln(\pi_i + \epsilon)$$
+<p>The entropy bonus coefficient is $c_e = 0.01$, ensuring trait diversity is maintained.</p>
+</div>
+
+<h3>6.4 Gradient Update</h3>
+<div class="card math">
+<p>The simplified policy gradient with entropy regularization:</p>
+$$\nabla_{\mathbf{z}} = -A \cdot (1 - \pi) - c_e \cdot (-\ln\pi - 1)$$
+$$\mathbf{z}_{t+1} = \mathbf{z}_t - \alpha \cdot \nabla_{\mathbf{z}}$$
+<p>Learning rate $\alpha = 0.003$. Updates occur every 5 steps when sufficient transitions are buffered.</p>
+</div>
+</section>
+
+
+<!-- ============================== SECTION 7 ============================== -->
+<section id="s7">
+<h2><span class="num">07</span>Experience Replay &amp; GAE Advantages</h2>
+<p>A circular buffer stores transitions for off-policy advantage estimation.</p>
+
+<h3>7.1 Transition Structure</h3>
+<pre>Transition = {
+    state:          {step: int}
+    action:         {action_type, player_id, target_context, ...}
+    reward:         float  (shaped reward after KL penalty)
+    next_state:     {step: int}
+    done:           bool
+    persona_vector: float[16]
+    advantage:      float  (computed by GAE)
+}</pre>
+
+<h3>7.2 Generalized Advantage Estimation (GAE)</h3>
+<div class="card math">
+<p>Advantages are computed in reverse over the buffer using TD(λ):</p>
+$$\delta_t = r_t + \gamma \cdot r_{t+1} \cdot (1 - d_t) - r_t$$
+$$\hat{A}_t = \delta_t + \gamma \cdot \lambda \cdot (1 - d_t) \cdot \hat{A}_{t+1}$$
+<p>Parameters: $\gamma = 0.99$ (discount factor), $\lambda = 0.95$ (GAE smoothing). Buffer capacity: 500 transitions.</p>
+</div>
+
+<h3>7.3 Batch Sampling</h3>
+<p>When the PPO update triggers (every 5 steps), a batch of up to 16 transitions is sampled uniformly from the buffer. The <strong>mean advantage</strong> from the batch is broadcast across all 16 trait dimensions to form the advantage vector for the PPO update.</p>
+</section>
+
+
+<!-- ============================== SECTION 8 ============================== -->
+<section id="s8">
+<h2><span class="num">08</span>GraphRAG Knowledge Layer</h2>
+<p>The system uses an <strong>in-memory property graph</strong> (replacing Neo4j) with <strong>vector similarity search</strong> (replacing Zep Cloud) to provide structured context retrieval for agents.</p>
+
+<h3>8.1 Graph Ontology</h3>
+<p>Seven entity types are defined:</p>
+<table>
+<thead><tr><th>Entity</th><th>Key Properties</th><th>Typical Count per Episode</th></tr></thead>
+<tbody>
+<tr><td>Player</td><td>name, position, nationality, age</td><td>1–11</td></tr>
+<tr><td>Team</td><td>name, formation, style, league</td><td>1–2</td></tr>
+<tr><td>League</td><td>name, country, strength</td><td>1</td></tr>
+<tr><td>Match</td><td>home/away teams, season, result</td><td>5–10</td></tr>
+<tr><td>Skill</td><td>name, category (16 skill nodes per player)</td><td>16</td></tr>
+<tr><td>Injury</td><td>type, severity, games missed</td><td>0–3</td></tr>
+<tr><td>Formation</td><td>name (e.g., "4-3-3")</td><td>1–2</td></tr>
+</tbody>
+</table>
+
+<p>Fourteen relation types connect entities: <code>PLAYS_FOR</code>, <code>HAS_SKILL</code>, <code>PARTICIPATED_IN</code>, <code>CHEMISTRY_WITH</code>, <code>HAS_MEMORY</code>, and more.</p>
+
+<h3>8.2 Dual-Path Retrieval</h3>
+<p>The <code>GraphRetriever</code> combines two retrieval strategies:</p>
+
+<div class="card highlight">
+<h4>Path 1: Structured Traversal (BFS)</h4>
+<p>A breadth-first search from the player node up to 2 hops, returning neighboring entities. This provides factual context: team, skills, past matches.</p>
+</div>
+
+<div class="card green">
+<h4>Path 2: Vector Similarity (Cosine)</h4>
+$$\text{sim}(\mathbf{q}, \mathbf{e}_i) = \frac{\mathbf{q} \cdot \mathbf{e}_i}{\|\mathbf{q}\| \cdot \|\mathbf{e}_i\|}$$
+<p>When a query embedding is provided, cosine similarity is computed against all stored node embeddings. The top-$K$ results ($K=3$) are returned.</p>
+</div>
+
+<h3>8.3 Episodic Memory (Zep-style)</h3>
+<p>After each simulation round, a memory node is appended to the graph:</p>
+<pre>Player →[HAS_MEMORY]→ EpisodeMemory("Round 3: 2G 1A rating=8.1")</pre>
+<p>This provides agents with a growing narrative of the player's simulated performance, enabling the report agent to build coherent scouting narratives.</p>
+</section>
+
+
+<!-- ============================== SECTION 9 ============================== -->
+<section id="s9">
+<h2><span class="num">09</span>Match Simulation Engine</h2>
+<p>The simulation engine generates <strong>structured match events</strong> that directly map to the player's persona traits. It is not a physics engine — it is a probabilistic event generator.</p>
+
+<h3>9.1 Event Generation</h3>
+<p>Each match round generates 5–25 events drawn from 12 types:</p>
+<pre>EVENT_TYPES = [pass, shot, goal, assist, dribble, tackle,
+               intercept, foul, save, cross, header, key_pass]</pre>
+
+<h4>Trait-Event Mapping</h4>
+<p>Each event type is influenced by 3 specific traits. For example:</p>
+<table>
+<thead><tr><th>Event</th><th>Primary Traits (indices)</th></tr></thead>
+<tbody>
+<tr><td>Goal</td><td>Positioning (2), Technical (3), Form Momentum (12)</td></tr>
+<tr><td>Dribble</td><td>Speed (0), Technical (3), Creativity (7)</td></tr>
+<tr><td>Tackle</td><td>Work Rate (8), Positioning (2), Pressure Tolerance (6)</td></tr>
+<tr><td>Key Pass</td><td>Creativity (7), Decision Speed (5), Teamwork (15)</td></tr>
+</tbody>
+</table>
+
+<h3>9.2 Event Sampling</h3>
+<div class="card math">
+<p>Event type weights are computed from the normalized persona vector:</p>
+$$w_e = 1 + \sum_{j \in \text{traits}(e)} \pi_j, \quad \text{then}\; \hat{w}_e = \frac{w_e}{\sum_e w_e}$$
+<p>Event types are sampled from this categorical distribution using <code>np.random.choice</code> with weighted probabilities. Defensive events (tackle, intercept) receive a bonus proportional to opponent strength.</p>
+</div>
+
+<h3>9.3 Success Probability</h3>
+<div class="card math">
+<p>For each event, the success probability combines multiple factors:</p>
+$$P(\text{success}) = \text{clip}\!\left(0.3 + 0.5 \cdot S_{\text{skill}} - 0.2 \cdot O_{\text{opp}} + H - F + I,\; 0.05,\; 0.95\right)$$
+<p>where $S_{\text{skill}}$ is the sum of relevant trait values, $O_{\text{opp}}$ is opponent strength, $H$ is home advantage ($+0.05$ or $-0.02$), $F$ is fatigue penalty ($f \times 0.15$), and $I$ is match importance boost ($m \times 0.1$).</p>
+</div>
+
+<h3>9.4 Rating Calculation</h3>
+<div class="card math">
+$$\text{Rating} = \text{clip}\!\left(6.0 + \sum_{e \in \text{events}} \Delta_e,\; 1.0,\; 10.0\right)$$
+<p>Each event contributes a rating impact $\Delta_e$ that depends on event type and success/failure. Goals add $+1.0$, assists $+0.6$, saves $+0.5$, while fouls deduct $-0.2$. Failed events receive $0.3\times$ the negative impact.</p>
+</div>
+
+<h3>9.5 Fatigue Model</h3>
+<div class="card math">
+$$f_{t+1} = \min\!\left(1.0,\; f_t + 0.03 + 0.02 \cdot f_t\right)$$
+<p>Initial fatigue depends on position and stamina:</p>
+$$f_0 = f_{\text{position}} \times \max(0.01,\; 1 - \text{stamina})$$
+<p>Position baselines range from 0.02 (GK) to 0.09 (LW/RW), reflecting the physical demands of each role.</p>
+</div>
+</section>
+
+
+<!-- ============================== SECTION 10 ============================== -->
+<section id="s10">
+<h2><span class="num">10</span>Task Grading System</h2>
+<p>Three tasks of escalating difficulty are provided, each with a deterministic grader that produces a score in $[0, 1]$.</p>
+
+<h3>Task 1: Single Player Stat Prediction <span class="badge easy">Easy</span></h3>
+<div class="card math">
+<p>Binary classification: predict if key metric is above or below career mean.</p>
+$$G_1 = \min\!\left(1.0,\; 0.5 \cdot \mathbb{1}[\hat{y} = y] + 0.3 \cdot (1 - |c - \mathbb{1}[\hat{y} = y]|) + 0.2 \cdot Q_r\right)$$
+<p>where $c$ is the agent's confidence, $\mathbb{1}[\hat{y}=y]$ is the correctness indicator, and $Q_r$ is the reasoning quality (word count heuristic: &lt;10 words→0.2, &lt;50→0.5, 50+→0.8).</p>
+<p><strong>Max steps</strong>: 10</p>
+</div>
+
+<h3>Task 2: Player-Team Tactical Fit <span class="badge medium">Medium</span></h3>
+<div class="card math">
+<p>Simulate 5 match rounds and grade each round on three sub-scores:</p>
+$$G_2 = \frac{1}{N} \sum_{r=1}^{N}\left(0.4 \cdot P_r + 0.4 \cdot T_r + 0.2 \cdot C_r\right)$$
+<p>where $P_r$ is output plausibility (goals &le; 5 and rating in [4,10] → 0.8), $T_r$ is tactical alignment (ratio of successful events), and $C_r$ is narrative coherence (&ge;3 distinct event types → 0.8).</p>
+<p><strong>Max steps</strong>: 20</p>
+</div>
+
+<h3>Task 3: Full Squad Recruitment Sim <span class="badge hard">Hard</span></h3>
+<div class="card math">
+<p>10-match season simulation for an 11-player squad, graded on 5 sub-scores:</p>
+$$G_3 = 0.30 \cdot S_{\text{output}} + 0.25 \cdot S_{\text{rotation}} + 0.20 \cdot S_{\text{injury}} + 0.15 \cdot S_{\text{tactical}} + 0.10 \cdot S_{\text{dev}}$$
+<p>Sub-graders:</p>
+<ul style="margin-left: 20px; color: var(--text-muted);">
+<li><strong>Squad Output</strong>: $\text{clip}(\text{GPG}/2, 0, 1)$ — goals-per-game ratio</li>
+<li><strong>Rotation</strong>: $\text{clip}(\text{rotations}/(\text{matches} \times 0.5), 0, 1)$ — player rotation frequency</li>
+<li><strong>Injury Management</strong>: rest decisions vs. injuries ratio</li>
+<li><strong>Tactical Evolution</strong>: $\text{clip}(\text{formation changes}/3, 0, 1)$</li>
+<li><strong>Individual Development</strong>: player improvement ratio</li>
+</ul>
+<p><strong>Max steps</strong>: 50</p>
+</div>
+</section>
+
+
+<!-- ============================== SECTION 11 ============================== -->
+<section id="s11">
+<h2><span class="num">11</span>Multi-Agent Swarm Orchestration</h2>
+<p>The system uses a <strong>mid-office router pattern</strong> where the Orchestrator receives each action and delegates to the appropriate specialist agent.</p>
+
+<h3>Agent Roles</h3>
+<table>
+<thead><tr><th>Agent</th><th>Responsibility</th><th>Input</th><th>Output</th></tr></thead>
+<tbody>
+<tr><td>Ontology Agent</td><td>Extract entities &amp; relationships from data</td><td>Raw stats CSV/JSON</td><td>Typed entity nodes</td></tr>
+<tr><td>Graph Builder Agent</td><td>Construct knowledge graph from persona</td><td>PlayerPersona + team context</td><td>Populated graph (25+ nodes)</td></tr>
+<tr><td>Persona Agent</td><td>Generate/update behavioral personas</td><td>Player ID + seed data</td><td>PlayerPersona (16-dim vector)</td></tr>
+<tr><td>SimRunner Agent</td><td>Execute match simulations</td><td>Persona + context + params</td><td>RoundSummary + metrics</td></tr>
+<tr><td>Grader Agent</td><td>Score task performance</td><td>Episode state + logs</td><td>Score in [0.0, 1.0]</td></tr>
+<tr><td>Report Agent</td><td>Generate scouting reports</td><td>Persona + sim results + graph</td><td>Markdown report</td></tr>
+</tbody>
+</table>
+
+<h3>Shared Blackboard</h3>
+<p>All agents read and write to a shared dictionary containing:</p>
+<pre>{
+    player_graph_id:       str,
+    persona:               PlayerPersona,
+    baseline_persona_vector: float[16],  (frozen at episode start)
+    sim_params:            dict,
+    round_log:             list[dict],
+    rl_state:              {policy_weights, value_estimates, entropy_bonus}
+}</pre>
+
+<h3>Action Routing</h3>
+<div class="flow">
+  <div class="flow-box">simulate_round</div>
+  <span class="flow-arrow">→</span>
+  <div class="flow-box">SimRunner Agent</div>
+</div>
+<div class="flow">
+  <div class="flow-box">query_persona</div>
+  <span class="flow-arrow">→</span>
+  <div class="flow-box">Persona Agent + Graph Retriever</div>
+</div>
+<div class="flow">
+  <div class="flow-box">adjust_params</div>
+  <span class="flow-arrow">→</span>
+  <div class="flow-box">Blackboard Update</div>
+</div>
+</section>
+
+
+<!-- ============================== SECTION 12 ============================== -->
+<section id="s12">
+<h2><span class="num">12</span>OpenEnv Compliance &amp; API Contract</h2>
+<p>The environment fully implements the <strong>OpenEnv specification</strong> (v0.2.0+), using the official SDK classes.</p>
+
+<h3>12.1 Type Hierarchy</h3>
+<pre>openenv.Action          ← AthleteAction(action_type, player_id, target_context, sim_params, query)
+openenv.Observation     ← AthleteObservation(goal, player_summary, round_result, metrics, drift, ...)
+openenv.State           ← AthleteState(task_id, player_id, current_round, cumulative_reward, ...)
+openenv.Environment     ← AthleteEnvironment (implements reset/step/state/close/get_metadata)</pre>
+
+<h3>12.2 HTTP API (via <code>create_fastapi_app</code>)</h3>
+<table>
+<thead><tr><th>Endpoint</th><th>Method</th><th>Request</th><th>Response</th></tr></thead>
+<tbody>
+<tr><td>/reset</td><td>POST</td><td><code>{seed?, episode_id?}</code></td><td><code>{observation, reward, done}</code></td></tr>
+<tr><td>/step</td><td>POST</td><td><code>{action: {...}}</code></td><td><code>{observation, reward, done}</code></td></tr>
+<tr><td>/state</td><td>GET</td><td>—</td><td><code>{episode_id, step_count, ...}</code></td></tr>
+<tr><td>/health</td><td>GET</td><td>—</td><td><code>{status: "healthy"}</code></td></tr>
+<tr><td>/schema</td><td>GET</td><td>—</td><td>JSON schemas for action/observation/state</td></tr>
+<tr><td>/metadata</td><td>GET</td><td>—</td><td>Environment name, description, version</td></tr>
+</tbody>
+</table>
+
+<h3>12.3 Episode Lifecycle</h3>
+<div class="diagram">
+       reset()                    step(action)  × N              done=True
+    ┌──────────┐              ┌───────────────────┐          ┌──────────────┐
+    │ Create   │              │ Route → Agent     │          │ Grade episode│
+    │ Episode  │─────────────►│ Compute reward    │─────────►│ Final score  │
+    │ Init     │              │ PPO update (5th)  │          │ Report gen   │
+    │ persona  │              │ Check termination │          │              │
+    └──────────┘              └───────────────────┘          └──────────────┘
+     ↓ Returns                  ↓ Returns                     ↓ Returns
+    AthleteObservation        AthleteObservation              AthleteObservation
+    (done=False, r=0.0)       (done=False, r=r_t)            (done=True, r=grade)
+</div>
+
+<h3>12.4 Validation</h3>
+<div class="card green">
+<p>The project passes <code>openenv validate</code> with all checks:</p>
+<pre>✓ pyproject.toml exists with [project.scripts] server entry point
+✓ uv.lock generated for reproducible builds
+✓ openenv-core>=0.2.0 declared as dependency
+✓ server/app.py has main() function
+✓ Dockerfile builds and serves on port 7860
+✓ 3 tasks with deterministic graders (scores 0.0–1.0)
+✓ inference.py at root using OpenAI client</pre>
+</div>
+</section>
+
+
+<!-- ============================== FOOTER ============================== -->
+<footer>
+  <p>Fidenz Athlete OS &mdash; Built by <a href="#">Fidenz Labs</a> for the OpenEnv Hackathon</p>
+  <p style="margin-top: 8px; font-size: 0.78rem;">Multi-sport player simulation platform with RL-constrained persona modeling, GraphRAG, and swarm agent orchestration.</p>
+</footer>
+
+</div><!-- /.container -->
+</body>
+</html>

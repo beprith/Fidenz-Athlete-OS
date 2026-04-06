@@ -1,10 +1,13 @@
 import { defineStore } from 'pinia'
-import { getPlayers, getTeams } from '../api/simulation.js'
+import { getPlayers, getTeams, getCompatibleTeams } from '../api/simulation.js'
 
 export const useSquadStore = defineStore('squad', {
   state: () => ({
     players: [],
     teams: [],
+    compatibleTeams: [],
+    selectedPlayerId: null,
+    selectedTeam: null,
     selectedPlayers: [],
     chemistryMatrix: [],
     weakestLink: null,
@@ -18,6 +21,15 @@ export const useSquadStore = defineStore('squad', {
       const map = {}
       state.players.forEach((p) => { map[p.player_id] = p })
       return map
+    },
+    selectedPlayer: (state) => {
+      if (!state.selectedPlayerId) return null
+      return state.players.find((p) => p.player_id === state.selectedPlayerId) || null
+    },
+    selectedPlayerSport: (state) => {
+      if (!state.selectedPlayerId) return null
+      const p = state.players.find((p) => p.player_id === state.selectedPlayerId)
+      return p ? p.sport : null
     },
     selectedCount: (state) => state.selectedPlayers.length,
   },
@@ -40,6 +52,25 @@ export const useSquadStore = defineStore('squad', {
       } catch (err) {
         this.error = err.message
       }
+    },
+
+    async selectPlayer(playerId) {
+      this.selectedPlayerId = playerId
+      this.selectedTeam = null
+      this.compatibleTeams = []
+      if (playerId) {
+        try {
+          const result = await getCompatibleTeams(playerId)
+          this.compatibleTeams = result.teams
+        } catch (err) {
+          this.error = err.message
+          this.compatibleTeams = this.teams
+        }
+      }
+    },
+
+    selectTeam(team) {
+      this.selectedTeam = team
     },
 
     togglePlayer(playerId) {

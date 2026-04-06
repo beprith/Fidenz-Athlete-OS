@@ -1,95 +1,62 @@
 """
-AthleteOSEnv — typed HTTP client for the Fidenz Athlete OS OpenEnv environment.
+AthleteOSEnv — OpenEnv-compliant WebSocket client for the Fidenz Athlete OS environment.
+Inherits from openenv.core.env_client.EnvClient for full SDK compatibility
+including from_docker_image() and from_env() class methods.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-import httpx
+from openenv.core.env_client import EnvClient, StepResult
 
 from models import AthleteAction, AthleteObservation, AthleteState
 
 
-@dataclass
-class StepResult:
-    observation: AthleteObservation
-    reward: float
-    done: bool
+class AthleteOSEnv(EnvClient[AthleteAction, AthleteObservation, AthleteState]):
+    """
+    Async WebSocket client for the Fidenz Athlete OS environment.
 
+    Usage (async):
+        async with AthleteOSEnv(base_url="http://localhost:7860") as env:
+            result = await env.reset()
+            result = await env.step(AthleteAction(action_type="simulate_round", ...))
 
-class AthleteOSEnv:
-    """Synchronous HTTP client that wraps the OpenEnv REST API."""
+    Usage (sync wrapper):
+        env = AthleteOSEnv(base_url="http://localhost:7860").sync()
+        with env:
+            result = env.reset()
+            result = env.step(AthleteAction(...))
 
-    def __init__(self, base_url: str = "http://localhost:7860"):
-        self.base_url = base_url.rstrip("/")
-        self._client: httpx.Client | None = None
+    Usage (from Docker image — used by evaluators):
+        env = await AthleteOSEnv.from_docker_image("fidenz-athlete-os:latest")
+        result = await env.reset()
+        await env.close()
+    """
 
-    def sync(self) -> "AthleteOSEnv":
-        return self
+    def _step_payload(self, action: AthleteAction | Dict[str, Any]) -> Dict[str, Any]:
+        if isinstance(action, dict):
+            return action
+        if hasattr(action, "model_dump"):
+            return action.model_dump()
+        if hasattr(action, "__dict__"):
+            return vars(action)
+        return dict(action)
 
-    def __enter__(self) -> "AthleteOSEnv":
-        self._client = httpx.Client(base_url=self.base_url, timeout=120.0)
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        if self._client:
-            self._client.close()
-
-    @property
-    def client(self) -> httpx.Client:
-        if self._client is None:
-            self._client = httpx.Client(base_url=self.base_url, timeout=120.0)
-        return self._client
-
-    def set_task(self, task_id: str) -> None:
-        """Pre-select a task for the next reset() call."""
-        resp = self.client.post("/api/set-task", json={"task_id": task_id})
-        resp.raise_for_status()
-
-    def reset(self, task_id: str | None = None) -> StepResult:
-        if task_id:
-            self.set_task(task_id)
-        resp = self.client.post("/reset", json={})
-        resp.raise_for_status()
-        data = resp.json()
-        return self._parse_result(data)
-
-    def step(self, action: AthleteAction | Dict[str, Any]) -> StepResult:
-        if isinstance(action, AthleteAction):
-            action_dict = action.model_dump()
-        else:
-            action_dict = action
-        # OpenEnv step expects: {"action": {...}}
-        resp = self.client.post("/step", json={"action": action_dict})
-        resp.raise_for_status()
-        data = resp.json()
-        return self._parse_result(data)
-
-    def state(self) -> AthleteState:
-        resp = self.client.get("/state")
-        resp.raise_for_status()
-        data = resp.json()
-        return AthleteState(**{
-            k: v for k, v in data.items()
-            if k in AthleteState.model_fields
-        })
-
-    def health(self) -> Dict[str, Any]:
-        resp = self.client.get("/health")
-        resp.raise_for_status()
-        return resp.json()
-
-    @staticmethod
-    def _parse_result(data: Dict[str, Any]) -> StepResult:
-        obs_data = data.get("observation", {})
+    def _parse_result(self, payload: Dict[str, Any]) -> StepResult[AthleteObservation]:
+        obs_data = payload.get("observation", {})
         obs = AthleteObservation(**{
             k: v for k, v in obs_data.items()
             if k in AthleteObservation.model_fields
         })
         return StepResult(
             observation=obs,
-            reward=data.get("reward", 0.0) or 0.0,
-            done=data.get("done", False),
+            reward=payload.get("reward", 0.0) or 0.0,
+            done=payload.get("done", False),
         )
+
+    def _parse_state(self, payload: Dict[str, Any]) -> AthleteState:
+        return AthleteState(**{
+            k: v for k, v in payload.items()
+            if k in AthleteState.model_fields
+        })

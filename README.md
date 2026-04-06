@@ -13,6 +13,8 @@ tags:
 
 An **OpenEnv-compliant reinforcement learning environment** that simulates professional athletes as living, memory-bearing AI personas. Recruitment teams, coaches, and analytics staff can upload seed data and run constrained RL simulations to predict future performance under any team or league context.
 
+Supports **Soccer**, **Basketball**, and **Cricket** with sport-specific event engines, fatigue models, field visualizations, and cross-sport validation.
+
 > **For a detailed explanation of all mathematics, algorithms, and architecture, see [`TECHNICAL_DEEP_DIVE.html`](TECHNICAL_DEEP_DIVE.html).**
 
 ---
@@ -22,9 +24,10 @@ An **OpenEnv-compliant reinforcement learning environment** that simulates profe
 Real-world sports recruitment is a high-stakes decision involving incomplete data, contextual nuance, and uncertain futures. Traditional scouting relies on static stat sheets. **Fidenz Athlete OS** bridges this gap by:
 
 1. **Modeling athletes as behavioral personas** — a 16-dimensional trait vector (speed, stamina, creativity, pressure tolerance, etc.) captures a player's behavioral fingerprint.
-2. **Simulating match performance** — a probabilistic event engine generates structured match events (goals, assists, tackles, fouls) weighted by the persona traits, opponent strength, fatigue, and home advantage.
+2. **Simulating match performance** — a probabilistic event engine generates structured match events weighted by persona traits, opponent strength, fatigue, and home advantage. Events are sport-specific: goals/assists (soccer), points/rebounds (basketball), runs/wickets (cricket).
 3. **Constraining persona drift** — a KL-divergence penalty ensures the RL policy doesn't warp the player's identity beyond plausible bounds.
 4. **Building knowledge graphs** — an in-memory GraphRAG layer (replacing Neo4j/Zep Cloud) stores player-team-skill-match relationships for structured retrieval.
+5. **Cross-sport validation** — the environment enforces sport-match constraints (e.g., a cricketer cannot be placed in a soccer team), returning actionable error messages.
 
 This is not a toy or game — it models a genuine task that recruitment analysts actually perform, and provides a rich, multi-dimensional observation space for agent evaluation.
 
@@ -33,38 +36,52 @@ This is not a toy or game — it models a genuine task that recruitment analysts
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    OpenEnv API Layer                          │
-│  POST /reset  →  Observation    POST /step  →  Observation   │
-│  GET  /state  →  State          GET  /health →  HealthResp   │
-└────────────────────┬─────────────────────────┬───────────────┘
-                     │                         │
-             ┌───────▼───────┐         ┌───────▼───────┐
-             │  Orchestrator  │◄───────►│  RL Engine    │
-             │  (Swarm Router)│         │  PPO + KL     │
-             └──┬──┬──┬──┬───┘         └───────────────┘
-                │  │  │  │
-    ┌───────┐ ┌▼┐┌▼┐┌▼┐┌▼───────┐
-    │Ontology│ │P││S││G││ Report │
-    │ Agent  │ │e││i││r││ Agent  │
-    └────────┘ │r││m││a│└────────┘
-               │s││R││d│
-               │o││u││e│
-               │n││n││r│
-               │a││.││ │
-               └─┘└─┘└─┘
-                     │
-             ┌───────▼───────┐
-             │ In-Memory Graph│
-             │ (Property Graph│
-             │  + Vector Sim) │
-             └────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                   OpenEnv API Layer                       │
+│  WebSocket /ws ← primary (persistent session per client) │
+│  POST /reset  →  Observation    POST /step  → Observation│
+│  GET  /state  →  State          GET  /health → HealthResp│
+└───────────────────┬─────────────────────────┬────────────┘
+                    │                         │
+            ┌───────▼───────┐         ┌───────▼───────┐
+            │  Orchestrator  │◄───────►│  RL Engine    │
+            │  (Swarm Router)│         │  PPO + KL     │
+            └──┬──┬──┬──┬───┘         └───────────────┘
+               │  │  │  │
+   ┌───────┐ ┌▼┐┌▼┐┌▼┐┌▼───────┐
+   │Ontology│ │P││S││G││ Report │
+   │ Agent  │ │e││i││r││ Agent  │
+   └────────┘ │r││m││a│└────────┘
+              │s││R││d│
+              │o││u││e│
+              │n││n││r│
+              │a││.││ │
+              └─┘└─┘└─┘
+                    │
+            ┌───────▼───────┐
+            │ In-Memory Graph│
+            │ (Property Graph│
+            │  + Vector Sim) │
+            └────────────────┘
 ```
 
 - **Multi-Agent Swarm**: Orchestrator routes actions to 6 specialized agents (Ontology, GraphBuilder, Persona, SimRunner, Grader, Report)
 - **GraphRAG**: In-memory property graph with Player/Team/League/Skill/Match nodes, BFS traversal, and cosine vector similarity search
 - **RL Engine**: PPO policy on a 16-dim persona trait vector with adaptive KL-divergence constraint to prevent persona drift
-- **Simulation**: Probabilistic event engine with trait-weighted event sampling, fatigue model, and dual-context parallel simulation
+- **Simulation**: Sport-aware probabilistic event engine with trait-weighted sampling, fatigue model, and dual-context parallel simulation
+- **WebSocket Sessions**: Each client connection gets an isolated environment instance via OpenEnv's `/ws` endpoint
+
+---
+
+## Multi-Sport Support
+
+| Sport | Events | Match Length | Stat Metrics | Field Visualization |
+|-------|--------|-------------|--------------|---------------------|
+| **Soccer** | pass, shot, dribble, tackle, foul, goal, assist | 90 min | Goals, Assists, Rating | Pitch (SVG) |
+| **Basketball** | two_pointer, three_pointer, free_throw, rebound, assist, steal, block, turnover | 48 min | Points, Assists, Rebounds | Court (SVG) |
+| **Cricket** | single, double, four, six, dot_ball, wicket, catch, run_out | 300 balls | Runs, Wickets, Strike Rate | Field (SVG) |
+
+The environment validates sport-team compatibility at every step. Attempting to simulate a cricketer in a soccer team returns an actionable error.
 
 ---
 
@@ -97,9 +114,9 @@ class AthleteObservation(openenv.Observation):
     round_result: dict               # {"goals": 1, "assists": 0, "rating": 7.2, "events": [...]}
     performance_metrics: dict        # {"tactical_fit": 0.72, "output_score": 0.65, ...}
     persona_drift_score: float       # KL divergence penalty from baseline
+    last_action_error: str | None    # Error message (e.g., sport mismatch) or None
     graph_context: str               # Structured graph traversal + memory context
     step_hint: str                   # Reward-based hint for the agent
-    screenshot_uri: str | None       # Optional (unused)
 ```
 
 The observation provides rich signal at every step: raw match events, aggregated metrics, persona drift, graph context, and an adaptive hint.
@@ -138,9 +155,15 @@ r_t = max(0, R_shaped − β·KL(π_current || π_baseline))
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `API_BASE_URL` | LLM API endpoint (OpenAI-compatible) | Yes |
-| `MODEL_NAME` | Model identifier for inference | Yes |
-| `HF_TOKEN` | Hugging Face / API authentication key | Yes |
+| `API_BASE_URL` | LLM API endpoint (OpenAI-compatible) | Yes (for inference) |
+| `MODEL_NAME` | Model identifier for inference | Yes (for inference) |
+| `HF_TOKEN` | Hugging Face / API authentication key | Yes (for inference) |
+| `IMAGE_NAME` | Docker image name (used by evaluator's `from_docker_image()`) | Optional |
+| `ENV_BASE_URL` | Environment server URL (default: `http://localhost:7860`) | Optional |
+| `WORKERS` | Uvicorn worker count (default: `1`) | Optional |
+| `MAX_CONCURRENT_ENVS` | Max WebSocket sessions per worker (default: `100`) | Optional |
+
+The server runs without LLM keys — the environment simulation is self-contained. Keys are only needed by the inference script to call the LLM for action generation.
 
 ---
 
@@ -183,11 +206,31 @@ docker run -p 7860:7860 \
 ### Run Baseline Inference
 
 ```bash
+# With a running server (WebSocket connection)
 ENV_BASE_URL=http://localhost:7860 \
 API_BASE_URL=https://api.openai.com/v1 \
 MODEL_NAME=gpt-4o-mini \
 HF_TOKEN=your_token \
 python inference.py
+
+# With Docker image (used by evaluators)
+IMAGE_NAME=fidenz-athlete-os \
+API_BASE_URL=https://api.openai.com/v1 \
+MODEL_NAME=gpt-4o-mini \
+HF_TOKEN=your_token \
+python inference.py
+```
+
+### Inference Output Format
+
+The script emits mandatory structured stdout logs:
+
+```
+[START] task=single_player_stat_prediction env=fidenz_athlete_os model=gpt-4o-mini
+[STEP] step=1 action={"action_type":"simulate_round",...} reward=0.72 done=false error=null
+[STEP] step=2 action={"action_type":"simulate_round",...} reward=0.45 done=false error=null
+...
+[END] success=true steps=10 score=0.460 rewards=0.72,0.45,...
 ```
 
 ---
@@ -198,35 +241,42 @@ python inference.py
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/ws` | WebSocket | **Primary** — persistent session per connection (used on HF Spaces) |
 | `/reset` | POST | Initialize new episode; body: `{seed?, episode_id?}` |
 | `/step` | POST | Execute one step; body: `{action: {...}}` |
 | `/state` | GET | Current episode state |
 | `/health` | GET | Health check → `{status: "healthy"}` |
-| `/schema` | GET | JSON schemas for action, observation, and state models |
+| `/schema/*` | GET | JSON schemas for action, observation, and state models |
 | `/metadata` | GET | Environment name, description, version |
 
-### Custom Extensions
+### Custom Extensions (Dashboard)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/set-task` | POST | Pre-select task for next reset: `{task_id: "..."}` |
 | `/api/tasks` | GET | List available tasks with difficulty and max_steps |
-| `/api/players` | GET | List sample player profiles |
-| `/api/teams` | GET | List sample team profiles |
+| `/api/players` | GET | List all sample player profiles |
+| `/api/teams?sport=` | GET | List teams, optionally filtered by sport |
+| `/api/compatible-teams/{player_id}` | GET | Teams matching a player's sport |
 | `/api/graph` | GET | Current knowledge graph (nodes + edges) |
 | `/api/report` | GET | Generate scouting report for active episode |
 | `/api/upload` | POST | Upload CSV/JSON data file |
-| `/ws/live` | WS | Real-time WebSocket event stream |
+| `/ws/live` | WebSocket | Real-time dashboard event stream |
 
 ---
 
 ## Baseline Scores
 
-| Task | Expected Score Range | Notes |
-|------|---------------------|-------|
-| Single Player Stat Prediction | 0.55 – 0.70 | Binary accuracy + confidence calibration |
-| Player-Team Tactical Fit | 0.40 – 0.58 | Depends on formation/role alignment |
-| Full Squad Recruitment Sim | 0.25 – 0.40 | Most challenging; requires multi-round strategy |
+Produced by `inference.py` using fallback actions (no LLM):
+
+| Task | Score | Steps |
+|------|-------|-------|
+| Single Player Stat Prediction | ~0.45 | 10 |
+| Player-Team Tactical Fit | ~0.39 | 20 |
+| Full Squad Recruitment Sim | ~0.34 | 50 |
+| **Average** | **~0.39** | |
+
+With a capable LLM (GPT-4o, Qwen-72B), expect scores 20–40% higher due to intelligent action selection and tactical adaptation.
 
 ---
 
@@ -234,24 +284,25 @@ python inference.py
 
 ```
 athlete_os_env/
-├── inference.py              # Baseline inference script (root, uses OpenAI client)
-├── client.py                 # Typed HTTP client for the environment
-├── models.py                 # Pydantic models (Action, Observation, State)
+├── inference.py              # Baseline inference (async, WebSocket, [START]/[STEP]/[END])
+├── client.py                 # WebSocket client (inherits openenv.EnvClient)
+├── models.py                 # Pydantic models (Action, Observation, State, Persona)
 ├── openenv.yaml              # OpenEnv manifest (3 tasks, env vars)
 ├── pyproject.toml            # Project metadata + [project.scripts] server entry
 ├── requirements.txt          # Python dependencies (includes openenv-core)
-├── uv.lock                   # Reproducible dependency lock
 ├── Dockerfile                # Multi-stage: Node 20 (frontend) + Python 3.11 (server)
 ├── docker-compose.yml        # Local dev compose
+├── .env.example              # Template for env vars
+├── .gitignore
 ├── TECHNICAL_DEEP_DIVE.html  # Detailed math & architecture explanation
 ├── README.md                 # This file
 ├── server/
 │   ├── app.py                # FastAPI server (create_fastapi_app + custom routes)
-│   ├── athlete_environment.py # Core OpenEnv Environment implementation
+│   ├── athlete_environment.py # Core OpenEnv Environment (reset/step/state)
 │   ├── agents/               # Swarm agents (orchestrator, persona, grader, etc.)
 │   ├── graphrag/             # In-memory property graph + retriever + ontology
 │   ├── rl/                   # PPO policy, KL constraint, reward engine, replay buffer
-│   ├── simulation/           # Event engine, persona config, simulation runner
+│   ├── simulation/           # Sport-aware event engine, fatigue model, dual-context runner
 │   ├── utils/                # LLM client, sports data, logger, retry
 │   └── static/               # Built Vue frontend (served by FastAPI)
 └── frontend/
@@ -275,7 +326,8 @@ athlete_os_env/
 | **RL Engine** | PPO (logit-space, no neural network) + KL Constraint + GAE |
 | **Knowledge** | In-memory property graph + cosine vector similarity |
 | **Frontend** | Vue 3, Vite, Tailwind CSS, D3.js, Chart.js, Pinia |
-| **Inference** | OpenAI client (reads API_BASE_URL, MODEL_NAME, HF_TOKEN) |
+| **Client** | OpenEnv `EnvClient` (WebSocket), supports `from_docker_image()` |
+| **Inference** | OpenAI client, async, structured `[START]/[STEP]/[END]` stdout |
 | **Deploy** | Docker (multi-stage), Hugging Face Spaces (port 7860) |
 
 ---
@@ -290,8 +342,21 @@ openenv validate
 # Docker build
 docker build -t fidenz-athlete-os .
 
-# Smoke test
+# Smoke test (HTTP)
 curl -X POST http://localhost:7860/reset -d '{}' -H 'Content-Type: application/json'
+
+# Smoke test (WebSocket via Python)
+python -c "
+import asyncio
+from client import AthleteOSEnv
+async def test():
+    async with AthleteOSEnv(base_url='http://localhost:7860') as env:
+        r = await env.reset()
+        print('Goal:', r.observation.goal)
+        r = await env.step({'action_type': 'simulate_round', 'player_id': 'default', 'target_context': {}})
+        print('Reward:', r.reward, 'Done:', r.done)
+asyncio.run(test())
+"
 ```
 
 ---

@@ -1,38 +1,97 @@
 """
 inference.py — Fidenz Athlete OS OpenEnv Baseline Inference Script
-Place at project root. Reads API_BASE_URL, MODEL_NAME, HF_TOKEN from env vars.
-Uses OpenAI client for all LLM calls per hackathon spec.
-Runtime target: < 20 minutes on 2vCPU / 8GB RAM.
+==================================================================
+MANDATORY:
+  - Environment variables: API_BASE_URL, MODEL_NAME, HF_TOKEN
+  - Uses OpenAI Client for all LLM calls
+  - Emits structured [START], [STEP], [END] stdout logs
+  - Runtime target: < 20 minutes on 2vCPU / 8GB RAM
+  - Each task returns score in [0, 1]
+
+STDOUT FORMAT:
+  [START] task=<task_name> env=<benchmark> model=<model_name>
+  [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+  [END]   success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
 """
 
-import os
+import asyncio
 import json
+import os
+import textwrap
+from typing import List, Optional
+
 from openai import OpenAI
-from client import AthleteOSEnv, StepResult
-from models import AthleteAction
 
-API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o-mini")
-HF_TOKEN = os.environ.get("HF_TOKEN", "sk-placeholder")
+from client import AthleteOSEnv
+from models import AthleteAction, TASK_MAX_STEPS
 
-SYSTEM_PROMPT = """You are a sports recruitment AI agent operating inside the Fidenz Athlete OS simulation environment.
-Your goal is to evaluate player performance by issuing simulation actions and interpreting results.
-Always respond with a valid JSON action in the format:
-{"action_type": "simulate_round", "player_id": "<id>", "target_context": {...}}
-or {"action_type": "query_persona", "player_id": "<id>", "query": "<question>"}
-"""
+# ---------------------------------------------------------------------------
+# Environment configuration
+# ---------------------------------------------------------------------------
+IMAGE_NAME = os.getenv("IMAGE_NAME")
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
-MAX_STEPS = 30
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+
+BENCHMARK = "fidenz_athlete_os"
+MAX_STEPS_OVERRIDE = None
 TEMPERATURE = 0.3
 MAX_TOKENS = 1024
+SUCCESS_SCORE_THRESHOLD = 0.1
+
 TASKS = [
     "single_player_stat_prediction",
     "player_team_fit_analysis",
     "full_squad_recruitment_sim",
 ]
 
-client = OpenAI(api_key=HF_TOKEN, base_url=API_BASE_URL)
+FALLBACK_ACTION = '{"action_type": "simulate_round", "player_id": "default", "target_context": {"team": "Arsenal", "formation": "4-3-3", "role": "CF"}}'
 
+SYSTEM_PROMPT = textwrap.dedent("""\
+    You are a sports recruitment AI agent operating inside the Fidenz Athlete OS
+    simulation environment. Your goal is to evaluate player performance by issuing
+    simulation actions and interpreting results.
+    Always respond with a valid JSON action in the format:
+    {"action_type": "simulate_round", "player_id": "<id>", "target_context": {...}}
+    or {"action_type": "query_persona", "player_id": "<id>", "query": "<question>"}
+""").strip()
+
+if not API_KEY:
+    import sys
+    print("[DEBUG] Warning: No HF_TOKEN or API_KEY set — LLM calls will use fallback actions", flush=True, file=sys.stderr)
+
+llm_client = OpenAI(api_key=API_KEY or "sk-not-configured", base_url=API_BASE_URL)
+
+
+# ---------------------------------------------------------------------------
+# Structured stdout logging (mandatory format)
+# ---------------------------------------------------------------------------
+
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    print(
+        f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}",
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def parse_action(text: str) -> dict:
     try:
@@ -42,86 +101,130 @@ def parse_action(text: str) -> dict:
             return json.loads(text[start:end])
     except Exception:
         pass
-    return {
-        "action_type": "simulate_round",
-        "player_id": "default",
-        "target_context": {"team": "Arsenal", "formation": "4-3-3", "role": "CF"},
-    }
+    return json.loads(FALLBACK_ACTION)
 
 
-def run_task(env: AthleteOSEnv, task_id: str) -> float:
-    result = env.reset(task_id=task_id)
-    obs = result.observation
-    history: list[str] = []
+def build_user_prompt(step: int, obs, history: List[str]) -> str:
+    return textwrap.dedent(f"""\
+        Goal: {obs.goal}
+        Player: {obs.player_summary}
+        Last round: {json.dumps(obs.round_result)}
+        Metrics: {json.dumps(obs.performance_metrics)}
+        Drift penalty: {obs.persona_drift_score:.3f}
+        Hint: {obs.step_hint}
+        History: {history[-5:]}
+        Issue your next action as JSON:
+    """).strip()
 
-    for step in range(1, MAX_STEPS + 1):
-        if result.done:
-            break
 
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": (
-                f"Goal: {obs.goal}\n"
-                f"Player: {obs.player_summary}\n"
-                f"Last round: {json.dumps(obs.round_result)}\n"
-                f"Metrics: {json.dumps(obs.performance_metrics)}\n"
-                f"Drift penalty: {obs.persona_drift_score:.3f}\n"
-                f"Hint: {obs.step_hint}\n"
-                f"History: {history[-5:]}\n"
-                "Issue your next action as JSON:"
-            )},
-        ]
+def get_model_action(step: int, obs, history: List[str]) -> str:
+    user_prompt = build_user_prompt(step, obs, history)
+    try:
+        completion = llm_client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=TEMPERATURE,
+            max_tokens=MAX_TOKENS,
+            stream=False,
+        )
+        return (completion.choices[0].message.content or "").strip()
+    except Exception as exc:
+        print(f"[DEBUG] Model request failed: {exc}", flush=True)
+        return FALLBACK_ACTION
 
-        try:
-            completion = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=messages,
-                temperature=TEMPERATURE,
-                max_tokens=MAX_TOKENS,
-            )
-            response_text = completion.choices[0].message.content or ""
-        except Exception as exc:
-            print(f"  LLM call failed: {exc}")
-            response_text = '{"action_type": "simulate_round", "player_id": "default", "target_context": {"team": "Arsenal"}}'
 
-        action_dict = parse_action(response_text)
-        action = AthleteAction(**{
-            k: v for k, v in action_dict.items()
-            if k in AthleteAction.model_fields
-        })
+# ---------------------------------------------------------------------------
+# Task runner
+# ---------------------------------------------------------------------------
 
-        result = env.step(action)
+async def run_task(env: AthleteOSEnv, task_id: str) -> float:
+    max_steps = TASK_MAX_STEPS.get(task_id, 20)
+    rewards: List[float] = []
+    steps_taken = 0
+    score = 0.0
+    success = False
+
+    log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
+
+    try:
+        result = await env.reset()
         obs = result.observation
-        reward = result.reward or 0.0
-        history.append(f"Step {step}: reward={reward:+.3f} drift={obs.persona_drift_score:.3f}")
-        print(f"  [{task_id}] Step {step} | reward={reward:+.3f} | done={result.done}")
+        history: List[str] = []
 
-        if result.done:
-            break
+        for step in range(1, max_steps + 1):
+            if result.done:
+                break
 
-    return result.reward or 0.0
+            response_text = get_model_action(step, obs, history)
+            action_dict = parse_action(response_text)
+            action = AthleteAction(**{
+                k: v for k, v in action_dict.items()
+                if k in AthleteAction.model_fields
+            })
+            action_str = json.dumps(action_dict, separators=(",", ":"))
+
+            result = await env.step(action)
+            obs = result.observation
+            reward = result.reward or 0.0
+            done = result.done
+            error = obs.last_action_error
+
+            rewards.append(reward)
+            steps_taken = step
+
+            log_step(
+                step=step,
+                action=action_str,
+                reward=reward,
+                done=done,
+                error=error,
+            )
+
+            history.append(f"Step {step}: {action_str} -> reward {reward:+.2f}")
+
+            if done:
+                break
+
+        score = sum(rewards) / max(len(rewards), 1)
+        score = min(max(score, 0.0), 1.0)
+        success = score >= SUCCESS_SCORE_THRESHOLD
+
+    finally:
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+
+    return score
 
 
-def main():
-    env_url = os.environ.get("ENV_BASE_URL", "http://localhost:7860")
-    scores: dict[str, float] = {}
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
-    with AthleteOSEnv(base_url=env_url) as env:
-        health = env.health()
-        print(f"Environment: {health}")
+async def main() -> None:
+    if IMAGE_NAME:
+        env = await AthleteOSEnv.from_docker_image(IMAGE_NAME)
+    else:
+        env_url = os.environ.get("ENV_BASE_URL", "http://localhost:7860")
+        env = AthleteOSEnv(base_url=env_url)
+        await env.connect()
 
+    try:
+        all_scores: dict[str, float] = {}
         for task_id in TASKS:
-            print(f"\n=== Running task: {task_id} ===")
-            score = run_task(env, task_id)
-            scores[task_id] = round(score, 4)
-            print(f"  Final score: {score:.4f}")
+            score = await run_task(env, task_id)
+            all_scores[task_id] = round(score, 4)
 
-    print("\n=== BASELINE SCORES ===")
-    for task, score in scores.items():
-        print(f"  {task}: {score:.4f}")
-    total = sum(scores.values()) / len(scores) if scores else 0
-    print(f"  AVERAGE: {total:.4f}")
+        print(f"[DEBUG] === BASELINE SCORES ===", flush=True)
+        for task, score in all_scores.items():
+            print(f"[DEBUG]   {task}: {score:.4f}", flush=True)
+        total = sum(all_scores.values()) / len(all_scores) if all_scores else 0
+        print(f"[DEBUG]   AVERAGE: {total:.4f}", flush=True)
+
+    finally:
+        await env.close()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

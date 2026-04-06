@@ -18,9 +18,14 @@
         </h4>
         <p class="text-xs text-gray-500">{{ player.position }} · {{ player.nationality }}</p>
       </div>
-      <span v-if="player.mbti_tag" class="text-[10px] bg-surface-700 px-1.5 py-0.5 rounded text-gray-400">
-        {{ player.mbti_tag }}
-      </span>
+      <div class="flex flex-col items-end gap-1">
+        <span v-if="player.sport" class="text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide" :class="sportTagClass">
+          {{ sportIcon }} {{ player.sport }}
+        </span>
+        <span v-if="player.mbti_tag" class="text-[10px] bg-surface-700 px-1.5 py-0.5 rounded text-gray-400">
+          {{ player.mbti_tag }}
+        </span>
+      </div>
     </div>
 
     <!-- Key traits (3 bars) -->
@@ -63,14 +68,34 @@ const initials = computed(() => {
   return parts.map((p) => p[0]).join('').slice(0, 2).toUpperCase()
 })
 
+const POSITION_COLORS = {
+  // Soccer
+  GK: '#f59e0b', CB: '#10b981', LB: '#10b981', RB: '#10b981',
+  CDM: '#8b5cf6', CM: '#8b5cf6', CAM: '#06b6d4',
+  LW: '#f43f5e', RW: '#f43f5e', CF: '#f43f5e', ST: '#f43f5e',
+  // Basketball
+  PG: '#06b6d4', SG: '#8b5cf6', SF: '#f59e0b', PF: '#10b981', C: '#f43f5e',
+  // Cricket
+  Batsman: '#06b6d4', Bowler: '#f43f5e', 'All-Rounder': '#8b5cf6',
+  'Wicket-Keeper': '#f59e0b', Opener: '#06b6d4', Spinner: '#10b981',
+}
+
 const positionColor = computed(() => {
-  const m = {
-    GK: '#f59e0b', CB: '#10b981', LB: '#10b981', RB: '#10b981',
-    CDM: '#8b5cf6', CM: '#8b5cf6', CAM: '#06b6d4',
-    LW: '#f43f5e', RW: '#f43f5e', CF: '#f43f5e', ST: '#f43f5e',
-    SF: '#06b6d4', Batsman: '#f59e0b',
+  return POSITION_COLORS[props.player.position] || '#6b7280'
+})
+
+const sportIcon = computed(() => {
+  const icons = { soccer: '⚽', basketball: '🏀', cricket: '🏏' }
+  return icons[props.player.sport] || '🎯'
+})
+
+const sportTagClass = computed(() => {
+  const cls = {
+    soccer: 'bg-green-900/40 text-green-400',
+    basketball: 'bg-orange-900/40 text-orange-400',
+    cricket: 'bg-blue-900/40 text-blue-400',
   }
-  return m[props.player.position] || '#6b7280'
+  return cls[props.player.sport] || 'bg-surface-600 text-gray-400'
 })
 
 const keyTraits = computed(() => {

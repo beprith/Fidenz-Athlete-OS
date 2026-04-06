@@ -44,21 +44,34 @@
       <div class="grid md:grid-cols-2 gap-6">
         <div>
           <label class="block text-sm font-medium text-gray-400 mb-2">Select Player</label>
-          <select v-model="selectedPlayer" class="w-full bg-surface-700 border border-surface-600 rounded-lg px-4 py-2.5 text-gray-200 focus:outline-none focus:border-accent-cyan">
+          <select v-model="selectedPlayer" @change="onPlayerChange" class="w-full bg-surface-700 border border-surface-600 rounded-lg px-4 py-2.5 text-gray-200 focus:outline-none focus:border-accent-cyan">
             <option value="">Choose a player...</option>
-            <option v-for="p in players" :key="p.player_id" :value="p.player_id">
-              {{ p.name }} ({{ p.position }}) — {{ p.nationality }}
-            </option>
+            <optgroup v-for="(group, sport) in playersBySport" :key="sport" :label="sportLabel(sport)">
+              <option v-for="p in group" :key="p.player_id" :value="p.player_id">
+                {{ p.name }} ({{ p.position }}) — {{ p.nationality }}
+              </option>
+            </optgroup>
           </select>
+          <p v-if="selectedPlayerSport" class="text-xs mt-1.5" :class="sportTextColor(selectedPlayerSport)">
+            {{ sportIcon(selectedPlayerSport) }} {{ sportLabel(selectedPlayerSport) }} player
+          </p>
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-400 mb-2">Target Team</label>
-          <select v-model="selectedTeam" class="w-full bg-surface-700 border border-surface-600 rounded-lg px-4 py-2.5 text-gray-200 focus:outline-none focus:border-accent-cyan">
-            <option value="">Choose a team...</option>
-            <option v-for="t in teams" :key="t.id" :value="t.id">
+          <label class="block text-sm font-medium text-gray-400 mb-2">
+            Target Team
+            <span v-if="selectedPlayerSport" class="text-xs" :class="sportTextColor(selectedPlayerSport)">
+              ({{ sportLabel(selectedPlayerSport) }} only)
+            </span>
+          </label>
+          <select v-model="selectedTeam" :disabled="!selectedPlayer" class="w-full bg-surface-700 border border-surface-600 rounded-lg px-4 py-2.5 text-gray-200 focus:outline-none focus:border-accent-cyan disabled:opacity-50">
+            <option value="">{{ selectedPlayer ? 'Choose a team...' : 'Select a player first' }}</option>
+            <option v-for="t in filteredTeams" :key="t.id" :value="t.id">
               {{ t.name }} — {{ t.league }} ({{ t.formation }})
             </option>
           </select>
+          <p v-if="selectedPlayer && !filteredTeams.length" class="text-xs text-accent-rose mt-1.5">
+            No teams available for this sport
+          </p>
         </div>
       </div>
 
@@ -102,7 +115,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useEpisodeStore } from '../store/episode.js'
 import { useSquadStore } from '../store/squad.js'
@@ -121,16 +134,12 @@ const selectedTeam = ref('')
 const scenario = ref('')
 const uploadedFile = ref(null)
 const loading = ref(false)
-const players = ref([])
-const teams = ref([])
 
 onMounted(async () => {
   try {
     tasks.value = await getTasks()
     await squadStore.fetchPlayers()
     await squadStore.fetchTeams()
-    players.value = squadStore.players
-    teams.value = squadStore.teams
   } catch {
     tasks.value = [
       { id: 'single_player_stat_prediction', name: 'Single Player Stat Prediction', difficulty: 'easy', max_steps: 10, description: 'Predict whether a player\'s key metric will be above or below career mean.' },
@@ -139,6 +148,49 @@ onMounted(async () => {
     ]
   }
 })
+
+const selectedPlayerSport = computed(() => {
+  if (!selectedPlayer.value) return null
+  const p = squadStore.players.find(p => p.player_id === selectedPlayer.value)
+  return p ? p.sport : null
+})
+
+const playersBySport = computed(() => {
+  const groups = {}
+  for (const p of squadStore.players) {
+    const s = p.sport || 'other'
+    if (!groups[s]) groups[s] = []
+    groups[s].push(p)
+  }
+  return groups
+})
+
+const filteredTeams = computed(() => {
+  if (!selectedPlayerSport.value) return squadStore.teams
+  return squadStore.teams.filter(t => t.sport === selectedPlayerSport.value)
+})
+
+function onPlayerChange() {
+  selectedTeam.value = ''
+  if (selectedPlayer.value) {
+    squadStore.selectPlayer(selectedPlayer.value)
+  }
+}
+
+function sportLabel(sport) {
+  const labels = { soccer: 'Soccer', basketball: 'Basketball', cricket: 'Cricket' }
+  return labels[sport] || sport
+}
+
+function sportIcon(sport) {
+  const icons = { soccer: '⚽', basketball: '🏀', cricket: '🏏' }
+  return icons[sport] || '🎯'
+}
+
+function sportTextColor(sport) {
+  const cls = { soccer: 'text-green-400', basketball: 'text-orange-400', cricket: 'text-blue-400' }
+  return cls[sport] || 'text-gray-400'
+}
 
 function difficultyColor(d) {
   const m = { easy: 'bg-accent-emerald/20 text-accent-emerald', medium: 'bg-accent-amber/20 text-accent-amber', hard: 'bg-accent-rose/20 text-accent-rose' }
@@ -155,6 +207,11 @@ function handleDrop(e) {
 async function launchSimulation() {
   loading.value = true
   try {
+    if (selectedPlayer.value) {
+      await squadStore.selectPlayer(selectedPlayer.value)
+      const team = filteredTeams.value.find(t => t.id === selectedTeam.value)
+      if (team) squadStore.selectTeam(team)
+    }
     await episodeStore.reset(selectedTask.value)
     simStore.resetSim()
     simStore.setPhase(1)

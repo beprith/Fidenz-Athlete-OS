@@ -21,20 +21,15 @@ from openenv.core.env_server import create_fastapi_app
 from models import AthleteAction, AthleteObservation
 from server.athlete_environment import AthleteEnvironment
 
-# ---------------------------------------------------------------------------
-# Shared environment singleton
-# ---------------------------------------------------------------------------
-
-_env = AthleteEnvironment()
-
 STATIC_DIR = Path(__file__).parent / "static"
 
 # ---------------------------------------------------------------------------
 # Create the OpenEnv-compliant FastAPI app via SDK factory
+# Per-connection environment instances for WebSocket sessions (spec-compliant)
 # ---------------------------------------------------------------------------
 
 app = create_fastapi_app(
-    env=lambda: _env,
+    env=AthleteEnvironment,
     action_cls=AthleteAction,
     observation_cls=AthleteObservation,
 )
@@ -53,7 +48,14 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# Custom API endpoints (beyond OpenEnv standard)
+# Shared singleton for dashboard/frontend custom endpoints
+# ---------------------------------------------------------------------------
+
+_dashboard_env = AthleteEnvironment()
+
+
+# ---------------------------------------------------------------------------
+# Custom API endpoints (beyond OpenEnv standard — used by frontend dashboard)
 # ---------------------------------------------------------------------------
 
 class SetTaskRequest(BaseModel):
@@ -62,8 +64,8 @@ class SetTaskRequest(BaseModel):
 
 @app.post("/api/set-task")
 async def set_task(req: SetTaskRequest):
-    """Pre-select a task for the next reset() call."""
-    _env.set_next_task(req.task_id)
+    """Pre-select a task for the next reset() call (dashboard use only)."""
+    _dashboard_env.set_next_task(req.task_id)
     return {"ok": True, "task_id": req.task_id}
 
 
@@ -85,14 +87,24 @@ async def list_players():
 
 
 @app.get("/api/teams")
-async def list_teams():
+async def list_teams(sport: Optional[str] = None):
     from server.utils.sports_data import SAMPLE_TEAMS
+    if sport:
+        return {"teams": [t for t in SAMPLE_TEAMS if t["sport"] == sport]}
     return {"teams": SAMPLE_TEAMS}
+
+
+@app.get("/api/compatible-teams/{player_id}")
+async def compatible_teams(player_id: str):
+    from server.utils.sports_data import get_compatible_teams, get_player_sport
+    sport = get_player_sport(player_id)
+    teams = get_compatible_teams(player_id)
+    return {"player_id": player_id, "sport": sport, "teams": teams}
 
 
 @app.get("/api/graph")
 async def get_graph():
-    graph = _env.orchestrator.graph
+    graph = _dashboard_env.orchestrator.graph
     nodes = []
     for nid, data in graph._nodes.items():
         nodes.append({"id": nid, "label": data.get("name", nid), "type": data.get("entity_type", "Unknown"), **data})
@@ -109,11 +121,11 @@ async def get_graph():
 
 @app.get("/api/report")
 async def get_report():
-    state_data = _env.state
+    state_data = _dashboard_env.state
     if not state_data.persona_initialized:
         raise HTTPException(status_code=400, detail="No active episode")
-    grade = _env.orchestrator.grade_episode(_env.state)
-    report = _env.orchestrator.generate_report(_env.state, grade)
+    grade = _dashboard_env.orchestrator.grade_episode(_dashboard_env.state)
+    report = _dashboard_env.orchestrator.generate_report(_dashboard_env.state, grade)
     return {"report": report, "grade": grade}
 
 
@@ -124,7 +136,7 @@ async def upload_data(file: UploadFile = File(...)):
 
 
 # ---------------------------------------------------------------------------
-# WebSocket for real-time updates
+# WebSocket for real-time dashboard updates (separate from OpenEnv /ws)
 # ---------------------------------------------------------------------------
 
 class ConnectionManager:
@@ -160,7 +172,7 @@ def _sync_ws_callback(payload: dict):
         pass
 
 
-_env.register_ws_callback(_sync_ws_callback)
+_dashboard_env.register_ws_callback(_sync_ws_callback)
 
 
 @app.websocket("/ws/live")
@@ -199,11 +211,12 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
 def main():
     import uvicorn
     port = int(os.environ.get("PORT", "7860"))
+    workers = int(os.environ.get("WORKERS", "1"))
     uvicorn.run(
         "server.app:app",
         host="0.0.0.0",
         port=port,
-        workers=1,
+        workers=workers,
         log_level="info",
     )
 

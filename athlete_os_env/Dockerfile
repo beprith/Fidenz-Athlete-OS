@@ -11,6 +11,8 @@ RUN npm run build
 FROM python:3.11-slim
 
 ENV PORT=7860
+ENV WORKERS=1
+ENV MAX_CONCURRENT_ENVS=100
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
@@ -32,4 +34,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s \
 
 EXPOSE 7860
 
-CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]
+CMD uvicorn server.app:app --host 0.0.0.0 --port ${PORT} --workers ${WORKERS}

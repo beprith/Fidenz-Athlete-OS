@@ -111,6 +111,17 @@ class AthleteEnvironment(Environment[AthleteObservation, AthleteAction, AthleteS
         **kwargs: Any,
     ) -> AthleteObservation:
         """Execute one step and return observation with reward and done flag."""
+        sport_error = self._validate_sport_match(action)
+        if sport_error:
+            return AthleteObservation(
+                goal=self._state.goal,
+                player_summary="",
+                last_action_error=sport_error,
+                step_hint="Select a team that matches the player's sport.",
+                done=False,
+                reward=0.0,
+            )
+
         self._state.step_count += 1
         self._state.current_round += 1
         self._state.simulation_status = "simulating"
@@ -231,6 +242,28 @@ class AthleteEnvironment(Environment[AthleteObservation, AthleteAction, AthleteS
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _validate_sport_match(self, action: AthleteAction) -> str | None:
+        """Return an error string if the player's sport doesn't match the target team's sport."""
+        from server.utils.sports_data import get_player_sport, SAMPLE_TEAMS
+        target_team = action.target_context.get("team", "")
+        if not target_team:
+            return None
+        player_id = action.player_id or self._state.player_id
+        player_sport = get_player_sport(player_id)
+        if player_sport is None:
+            return None
+        team_entry = next((t for t in SAMPLE_TEAMS if t["name"] == target_team or t["id"] == target_team), None)
+        if team_entry is None:
+            return None
+        team_sport = team_entry.get("sport")
+        if team_sport and team_sport != player_sport:
+            return (
+                f"Sport mismatch: {player_id} plays {player_sport} "
+                f"but {team_entry['name']} is a {team_sport} team. "
+                f"Select a {player_sport} team instead."
+            )
+        return None
 
     def _check_done(self, result: dict[str, Any]) -> bool:
         max_steps = TASK_MAX_STEPS.get(self._state.task_id, 10)
