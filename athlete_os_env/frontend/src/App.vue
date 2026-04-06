@@ -3,9 +3,13 @@
     <header class="border-b border-surface-600 bg-surface-800/80 backdrop-blur-sm sticky top-0 z-50">
       <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
         <router-link to="/" class="flex items-center gap-3 group">
-          <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-accent-cyan to-accent-emerald flex items-center justify-center text-surface-900 font-extrabold text-sm">
-            FA
-          </div>
+          <img
+            src="/fidenz-labs-logo.png"
+            alt="Fidenz Labs"
+            class="h-9 w-auto object-contain"
+            width="36"
+            height="36"
+          />
           <span class="text-lg font-bold tracking-tight group-hover:text-accent-cyan transition-colors">
             Fidenz Athlete OS
           </span>

@@ -2,6 +2,13 @@
   <div class="max-w-6xl mx-auto px-4 py-12">
     <!-- Hero -->
     <div class="text-center mb-16">
+      <img
+        src="/fidenz-labs-logo.png"
+        alt="Fidenz Labs"
+        class="mx-auto h-24 w-auto object-contain mb-8 drop-shadow-[0_0_24px_rgba(34,211,238,0.15)]"
+        width="120"
+        height="120"
+      />
       <h1 class="text-5xl font-extrabold tracking-tight mb-4">
         <span class="bg-gradient-to-r from-accent-cyan via-accent-emerald to-accent-cyan bg-clip-text text-transparent">
           Fidenz Athlete OS
