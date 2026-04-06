@@ -195,6 +195,15 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
     if (STATIC_DIR / "assets").exists():
         app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="static-assets")
 
+    # Vite copies `public/` files to dist root; we only mount /assets above, so root
+    # URLs like /fidenz-labs-logo.png must be served explicitly.
+    @app.get("/fidenz-labs-logo.png", include_in_schema=False)
+    async def serve_fidenz_logo():
+        logo = STATIC_DIR / "fidenz-labs-logo.png"
+        if not logo.is_file():
+            raise HTTPException(status_code=404, detail="Logo not found")
+        return FileResponse(logo, media_type="image/png")
+
     @app.get("/app/{rest_of_path:path}")
     async def serve_spa(rest_of_path: str = ""):
         return FileResponse(str(STATIC_DIR / "index.html"))
