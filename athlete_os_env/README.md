@@ -87,6 +87,8 @@ This is not a toy or game — it models a genuine task that recruitment analysts
 
 The environment validates sport-team compatibility at every step. Attempting to simulate a cricketer in a soccer team returns an actionable error.
 
+**Cricket dataset:** [`archive.zip`](https://github.com/beprith/Fidenz-Athlete-OS/blob/main/archive.zip) at the root of **Fidenz-Athlete-OS** (`Fidenz-Athlete-OS/archive.zip` in a repo checkout) contains sample cricket data for ingest and simulation workflows.
+
 ---
 
 ## Action Space
