@@ -6,9 +6,10 @@
           <img
             src="/fidenz-labs-logo.png"
             alt="Fidenz Labs"
-            class="h-9 w-auto object-contain"
+            class="logo-header"
             width="36"
             height="36"
+            decoding="async"
           />
           <span class="text-lg font-bold tracking-tight group-hover:text-accent-cyan transition-colors">
             Fidenz Athlete OS
