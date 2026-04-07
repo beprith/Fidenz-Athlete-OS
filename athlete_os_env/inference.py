@@ -65,18 +65,71 @@ def _merge_no_proxy_for_host(host: str) -> None:
             os.environ[key] = ",".join(parts)
 
 
-def resolve_env_base_url() -> str:
-    """URL of the running OpenEnv server (HTTP/S). Evaluators use different variable names."""
+def explicit_env_base_url() -> Optional[str]:
+    """Non-empty HTTP(S) base URL if the harness set any known env var (Phase 2 / Spaces)."""
     for key in (
         "ENV_BASE_URL",
         "OPENENV_BASE_URL",
+        "OPENENV_URL",
         "SPACE_URL",
         "HF_SPACE_URL",
+        "SPACE_APP_URL",
     ):
         v = os.environ.get(key, "").strip()
         if v:
             return v.rstrip("/")
-    return "http://127.0.0.1:7860"
+    return None
+
+
+def resolve_env_base_url() -> str:
+    """URL of the running OpenEnv server; default local dev port."""
+    return explicit_env_base_url() or "http://127.0.0.1:7860"
+
+
+def _use_docker_image() -> bool:
+    """Docker is unavailable in many CI / submission runners; allow opt-out."""
+    if os.getenv("USE_DOCKER_IMAGE", "").strip().lower() in ("0", "false", "no", "off"):
+        return False
+    return bool(IMAGE_NAME)
+
+
+async def connect_env_client() -> AthleteOSEnv:
+    """
+    Connect to the environment.
+
+    Order (critical for Phase 2):
+    1. Explicit ENV_BASE_URL / SPACE_URL / … — always wins over IMAGE_NAME so runners
+       that inject the Space URL but also set IMAGE_NAME do not call from_docker_image.
+    2. Else from_docker_image(IMAGE_NAME) when USE_DOCKER_IMAGE is not disabled.
+    3. If Docker fails or is skipped, fall back to resolve_env_base_url() (localhost default).
+    """
+    explicit = explicit_env_base_url()
+    if explicit:
+        return await _connect_via_url(explicit)
+
+    if IMAGE_NAME and _use_docker_image():
+        try:
+            return await AthleteOSEnv.from_docker_image(IMAGE_NAME)
+        except Exception as exc:
+            print(
+                f"[DEBUG] from_docker_image({IMAGE_NAME!r}) failed ({type(exc).__name__}: {exc}); "
+                "falling back to HTTP/WebSocket URL",
+                flush=True,
+            )
+            traceback.print_exc(file=sys.stderr)
+            return await _connect_via_url(resolve_env_base_url())
+
+    return await _connect_via_url(resolve_env_base_url())
+
+
+async def _connect_via_url(url: str) -> AthleteOSEnv:
+    parsed = urlparse(url)
+    if parsed.hostname:
+        _merge_no_proxy_for_host(parsed.hostname)
+    print(f"[DEBUG] Connecting to environment at {url}", flush=True)
+    client = AthleteOSEnv(base_url=url)
+    await client.connect()
+    return client
 
 SYSTEM_PROMPT = textwrap.dedent("""\
     You are a sports recruitment AI agent operating inside the Fidenz Athlete OS
@@ -241,16 +294,7 @@ async def run_task(env: AthleteOSEnv, task_id: str) -> float:
 async def main() -> None:
     env: Optional[AthleteOSEnv] = None
     try:
-        if IMAGE_NAME:
-            env = await AthleteOSEnv.from_docker_image(IMAGE_NAME)
-        else:
-            env_url = resolve_env_base_url()
-            parsed = urlparse(env_url)
-            if parsed.hostname:
-                _merge_no_proxy_for_host(parsed.hostname)
-            print(f"[DEBUG] Connecting to environment at {env_url}", flush=True)
-            env = AthleteOSEnv(base_url=env_url)
-            await env.connect()
+        env = await connect_env_client()
 
         all_scores: dict[str, float] = {}
         for task_id in TASKS:
