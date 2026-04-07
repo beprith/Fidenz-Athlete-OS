@@ -17,8 +17,11 @@ STDOUT FORMAT:
 import asyncio
 import json
 import os
+import sys
 import textwrap
+import traceback
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from openai import OpenAI
 
@@ -48,6 +51,33 @@ TASKS = [
 
 FALLBACK_ACTION = '{"action_type": "simulate_round", "player_id": "default", "target_context": {"team": "Arsenal", "formation": "4-3-3", "role": "CF"}}'
 
+
+def _merge_no_proxy_for_host(host: str) -> None:
+    """Avoid HTTP(S)_PROXY breaking WSS to Space / local env hosts (mirrors OpenEnv localhost logic)."""
+    if not host:
+        return
+    h = host.lower().split(":")[0]
+    for key in ("NO_PROXY", "no_proxy"):
+        cur = os.environ.get(key, "")
+        parts = [p.strip() for p in cur.split(",") if p.strip()]
+        if h not in [p.lower() for p in parts]:
+            parts.append(h)
+            os.environ[key] = ",".join(parts)
+
+
+def resolve_env_base_url() -> str:
+    """URL of the running OpenEnv server (HTTP/S). Evaluators use different variable names."""
+    for key in (
+        "ENV_BASE_URL",
+        "OPENENV_BASE_URL",
+        "SPACE_URL",
+        "HF_SPACE_URL",
+    ):
+        v = os.environ.get(key, "").strip()
+        if v:
+            return v.rstrip("/")
+    return "http://127.0.0.1:7860"
+
 SYSTEM_PROMPT = textwrap.dedent("""\
     You are a sports recruitment AI agent operating inside the Fidenz Athlete OS
     simulation environment. Your goal is to evaluate player performance by issuing
@@ -58,7 +88,6 @@ SYSTEM_PROMPT = textwrap.dedent("""\
 """).strip()
 
 if not API_KEY:
-    import sys
     print("[DEBUG] Warning: No HF_TOKEN or API_KEY set — LLM calls will use fallback actions", flush=True, file=sys.stderr)
 
 llm_client = OpenAI(api_key=API_KEY or "sk-not-configured", base_url=API_BASE_URL)
@@ -105,13 +134,15 @@ def parse_action(text: str) -> dict:
 
 
 def build_user_prompt(step: int, obs, history: List[str]) -> str:
+    last_round = obs.round_result if obs.round_result is not None else {}
+    metrics = obs.performance_metrics if obs.performance_metrics is not None else {}
     return textwrap.dedent(f"""\
         Goal: {obs.goal}
         Player: {obs.player_summary}
-        Last round: {json.dumps(obs.round_result)}
-        Metrics: {json.dumps(obs.performance_metrics)}
+        Last round: {json.dumps(last_round)}
+        Metrics: {json.dumps(metrics)}
         Drift penalty: {obs.persona_drift_score:.3f}
-        Hint: {obs.step_hint}
+        Hint: {obs.step_hint or ''}
         History: {history[-5:]}
         Issue your next action as JSON:
     """).strip()
@@ -150,7 +181,7 @@ async def run_task(env: AthleteOSEnv, task_id: str) -> float:
     log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        result = await env.reset()
+        result = await env.reset(task_id=task_id)
         obs = result.observation
         history: List[str] = []
 
@@ -160,10 +191,15 @@ async def run_task(env: AthleteOSEnv, task_id: str) -> float:
 
             response_text = get_model_action(step, obs, history)
             action_dict = parse_action(response_text)
-            action = AthleteAction(**{
-                k: v for k, v in action_dict.items()
-                if k in AthleteAction.model_fields
-            })
+            try:
+                action = AthleteAction(**{
+                    k: v for k, v in action_dict.items()
+                    if k in AthleteAction.model_fields
+                })
+            except Exception as exc:
+                print(f"[DEBUG] Invalid action shape, using fallback: {exc}", flush=True)
+                action = AthleteAction.model_validate_json(FALLBACK_ACTION)
+                action_dict = json.loads(FALLBACK_ACTION)
             action_str = json.dumps(action_dict, separators=(",", ":"))
 
             result = await env.step(action)
@@ -203,14 +239,19 @@ async def run_task(env: AthleteOSEnv, task_id: str) -> float:
 # ---------------------------------------------------------------------------
 
 async def main() -> None:
-    if IMAGE_NAME:
-        env = await AthleteOSEnv.from_docker_image(IMAGE_NAME)
-    else:
-        env_url = os.environ.get("ENV_BASE_URL", "http://localhost:7860")
-        env = AthleteOSEnv(base_url=env_url)
-        await env.connect()
-
+    env: Optional[AthleteOSEnv] = None
     try:
+        if IMAGE_NAME:
+            env = await AthleteOSEnv.from_docker_image(IMAGE_NAME)
+        else:
+            env_url = resolve_env_base_url()
+            parsed = urlparse(env_url)
+            if parsed.hostname:
+                _merge_no_proxy_for_host(parsed.hostname)
+            print(f"[DEBUG] Connecting to environment at {env_url}", flush=True)
+            env = AthleteOSEnv(base_url=env_url)
+            await env.connect()
+
         all_scores: dict[str, float] = {}
         for task_id in TASKS:
             score = await run_task(env, task_id)
@@ -223,8 +264,16 @@ async def main() -> None:
         print(f"[DEBUG]   AVERAGE: {total:.4f}", flush=True)
 
     finally:
-        await env.close()
+        if env is not None:
+            try:
+                await env.close()
+            except Exception as exc:
+                print(f"[DEBUG] env.close() failed (ignored): {exc}", flush=True)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        raise
