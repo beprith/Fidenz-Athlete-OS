@@ -25,7 +25,7 @@ from server.rl.kl_constraint import KLConstraint
 from server.rl.ppo_policy import PPOPolicy
 from server.rl.experience_replay import ExperienceReplay, Transition
 from server.utils.logger import EpisodeLogger, get_logger
-from server.utils.score_bounds import clip_open_unit_interval
+from server.utils.score_bounds import clip_open_unit_interval, sanitize_performance_metrics
 
 log = get_logger("environment")
 
@@ -35,6 +35,35 @@ TASK_IDS = [
     "player_team_fit_analysis",
     "full_squad_recruitment_sim",
 ]
+
+
+def _observation(
+    *,
+    goal: str,
+    player_summary: str = "",
+    round_result: Optional[dict[str, Any]] = None,
+    performance_metrics: Optional[dict[str, Any]] = None,
+    persona_drift_score: float = 0.0,
+    last_action_error: Optional[str] = None,
+    graph_context: Optional[str] = None,
+    step_hint: Optional[str] = None,
+    done: bool = False,
+    reward: float = 0.0,
+) -> AthleteObservation:
+    """Single choke-point for observation scores (open interval + nested metrics)."""
+    rw = clip_open_unit_interval(float(reward))
+    return AthleteObservation(
+        goal=goal,
+        player_summary=player_summary,
+        round_result=round_result,
+        performance_metrics=sanitize_performance_metrics(performance_metrics),
+        persona_drift_score=clip_open_unit_interval(float(persona_drift_score)),
+        last_action_error=last_action_error,
+        graph_context=graph_context,
+        step_hint=step_hint,
+        done=done,
+        reward=rw,
+    )
 
 
 class AthleteEnvironment(Environment[AthleteObservation, AthleteAction, AthleteState]):
@@ -96,13 +125,17 @@ class AthleteEnvironment(Environment[AthleteObservation, AthleteAction, AthleteS
 
         self._emit_ws("phase_change", {"phase": "idle"})
 
-        return AthleteObservation(
+        initial_reward = clip_open_unit_interval(0.0)
+        self._state.reward = initial_reward
+
+        return _observation(
             goal=obs_data["goal"],
             player_summary=obs_data["player_summary"],
             graph_context=obs_data.get("graph_context"),
             step_hint="Start by simulating a round with target_context.",
             done=False,
-            reward=clip_open_unit_interval(0.0),
+            reward=initial_reward,
+            persona_drift_score=0.0,
         )
 
     def step(
@@ -114,13 +147,16 @@ class AthleteEnvironment(Environment[AthleteObservation, AthleteAction, AthleteS
         """Execute one step and return observation with reward and done flag."""
         sport_error = self._validate_sport_match(action)
         if sport_error:
-            return AthleteObservation(
+            r = clip_open_unit_interval(0.0)
+            self._state.reward = r
+            return _observation(
                 goal=self._state.goal,
                 player_summary="",
                 last_action_error=sport_error,
                 step_hint="Select a team that matches the player's sport.",
                 done=False,
-                reward=clip_open_unit_interval(0.0),
+                reward=r,
+                persona_drift_score=0.0,
             )
 
         self._state.step_count += 1
@@ -133,13 +169,16 @@ class AthleteEnvironment(Environment[AthleteObservation, AthleteAction, AthleteS
         result = self.orchestrator.route(action, self._state)
 
         if "error" in result and result["error"]:
-            return AthleteObservation(
+            r = clip_open_unit_interval(0.0)
+            self._state.reward = r
+            return _observation(
                 goal=self._state.goal,
                 player_summary=result.get("player_summary", ""),
                 last_action_error=result["error"],
                 step_hint="Fix the error and try again.",
                 done=False,
-                reward=clip_open_unit_interval(0.0),
+                reward=r,
+                persona_drift_score=0.0,
             )
 
         raw_reward = self.reward_engine.compute(result, self._state)
@@ -200,7 +239,7 @@ class AthleteEnvironment(Environment[AthleteObservation, AthleteAction, AthleteS
             f"kl={kl_penalty:.3f} done={done}"
         )
 
-        return AthleteObservation(
+        return _observation(
             goal=self._state.goal,
             player_summary=result.get("player_summary", ""),
             round_result=result.get("round_result"),

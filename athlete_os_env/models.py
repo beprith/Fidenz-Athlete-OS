@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 from openenv.core.env_server import Action, Observation, State
+
+from server.utils.score_bounds import clip_open_unit_interval
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +58,20 @@ class AthleteState(State):
     goal: str = ""
     baseline_persona_vector: Optional[List[float]] = None
     reward: float = 0.0
+
+    @model_serializer(mode="wrap")
+    def _serialize_for_open_interval(self, handler):
+        """JSON from /state must not expose 0.0/1.0 or unbounded sums for strict validators."""
+        data = handler(self)
+        tr = max(int(data.get("total_rounds") or 1), 1)
+        cap = tr * 0.99
+        cum = float(data.get("cumulative_reward") or 0.0)
+        norm_cum = cum / cap if cap > 1e-12 else 0.0
+        data["cumulative_reward"] = clip_open_unit_interval(min(1.0, max(0.0, norm_cum)))
+        data["reward"] = clip_open_unit_interval(float(data.get("reward") or 0.0))
+        kl = float(data.get("kl_penalty_total") or 0.0)
+        data["kl_penalty_total"] = clip_open_unit_interval(min(1.0, max(0.0, kl)))
+        return data
 
 
 # ---------------------------------------------------------------------------
