@@ -156,23 +156,26 @@ def log_start(task: str, env: str, model: str) -> None:
 
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    # Single-line stdout: strip newlines from error text
+    safe_reward = clip_open_unit_interval(reward)
     if error:
         error_val = error.replace("\n", " ").replace("\r", " ")
     else:
         error_val = "null"
     done_val = str(done).lower()
     print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}",
+        f"[STEP] step={step} action={action} reward={safe_reward:.2f} done={done_val} error={error_val}",
         flush=True,
     )
 
 
 def log_end(success: bool, steps: int, rewards: List[float]) -> None:
-    """Hackathon format: [END] has success, steps, rewards only (no score field)."""
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    safe_rewards = [clip_open_unit_interval(r) for r in rewards]
+    rewards_str = ",".join(f"{r:.2f}" for r in safe_rewards)
+    avg = clip_open_unit_interval(
+        sum(safe_rewards) / max(len(safe_rewards), 1)
+    )
     print(
-        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={avg:.2f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -234,7 +237,7 @@ async def run_task(env: AthleteOSEnv, task_id: str) -> float:
     max_steps = TASK_MAX_STEPS.get(task_id, 20)
     rewards: List[float] = []
     steps_taken = 0
-    score = 0.0
+    score = clip_open_unit_interval(0.0)
     success = False
 
     log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
@@ -308,7 +311,7 @@ async def main() -> None:
         all_scores: dict[str, float] = {}
         for task_id in TASKS:
             score = await run_task(env, task_id)
-            all_scores[task_id] = round(score, 4)
+            all_scores[task_id] = clip_open_unit_interval(round(score, 4))
 
         print(f"[DEBUG] === BASELINE SCORES ===", flush=True, file=sys.stderr)
         for task, score in all_scores.items():

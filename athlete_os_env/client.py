@@ -11,6 +11,7 @@ from typing import Any, Dict
 from openenv.core.env_client import EnvClient, StepResult
 
 from models import AthleteAction, AthleteObservation, AthleteState
+from server.utils.score_bounds import clip_open_unit_interval
 
 
 class AthleteOSEnv(EnvClient[AthleteAction, AthleteObservation, AthleteState]):
@@ -49,9 +50,10 @@ class AthleteOSEnv(EnvClient[AthleteAction, AthleteObservation, AthleteState]):
             k: v for k, v in obs_data.items()
             if k in AthleteObservation.model_fields
         })
+        raw_reward = payload.get("reward")
         return StepResult(
             observation=obs,
-            reward=payload.get("reward", 0.0) or 0.0,
+            reward=clip_open_unit_interval(float(raw_reward) if raw_reward is not None else 0.0),
             done=payload.get("done", False),
         )
 

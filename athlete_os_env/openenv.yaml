@@ -47,12 +47,12 @@ tasks:
 
 reward:
   type: shaped
-  # Inner band matches runtime clipping (strictly between 0 and 1; endpoints excluded for validators).
-  range: [0.01, 0.99]
+  range: [0.0, 1.0]
   description: >
-    Shaped reward clipped to (0, 1) with inner band [0.01, 0.99] for two-decimal logs and
-    submission validators. Sigmoid partial credit per step; KL-divergence penalty limits
-    persona drift from the seed baseline.
+    Bounded sigmoid reward strictly in (0, 1) — endpoints excluded.
+    Runtime clipping to [0.01, 0.99] ensures two-decimal formatting never
+    rounds to 0.00 or 1.00. KL-divergence penalty limits persona drift
+    from the seed baseline.
 
 env_vars:
   - API_BASE_URL

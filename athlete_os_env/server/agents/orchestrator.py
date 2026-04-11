@@ -191,8 +191,8 @@ class OrchestratorAgent:
             "graph_context": graph_ctx,
             "persona_vector": persona.trait_vector(),
             "performance_metrics": {
-                "output_score": 0.0,
-                "tactical_fit": 0.0,
+                "output_score": 0.1,
+                "tactical_fit": 0.1,
                 "coherence_score": 0.8,
                 "step_efficiency": 0.9,
             },
@@ -207,8 +207,8 @@ class OrchestratorAgent:
             "player_summary": f"Parameters adjusted: {action.sim_params}",
             "persona_vector": persona.trait_vector() if persona else [0.5] * 16,
             "performance_metrics": {
-                "output_score": 0.0,
-                "tactical_fit": 0.0,
+                "output_score": 0.1,
+                "tactical_fit": 0.1,
                 "coherence_score": 0.8,
                 "step_efficiency": 0.9,
             },

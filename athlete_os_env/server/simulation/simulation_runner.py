@@ -14,6 +14,7 @@ import numpy as np
 from models import PlayerPersona, RoundSummary, SimulationResult
 from server.simulation.event_engine import EventEngine
 from server.simulation.persona_config import SimConfig, adjust_fatigue
+from server.utils.score_bounds import clip_open_unit_interval
 
 SPORT_MATCH_MINUTES = {
     "soccer": 90,
@@ -79,24 +80,24 @@ class SimulationRunner:
         if sport == "soccer":
             total_goals = sum(r.goals for r in rounds)
             total_assists = sum(r.assists for r in rounds)
-            output_score = min(1.0, (total_goals + total_assists * 0.7) / max(num_rounds * 0.8, 1))
+            output_score = (total_goals + total_assists * 0.7) / max(num_rounds * 0.8, 1)
             summary_text = f"{persona.name} at {config.team} ({config.role}): {total_goals}G {total_assists}A, avg {avg_rating:.1f}"
         elif sport == "basketball":
             total_points = sum(r.goals for r in rounds)
             total_assists = sum(r.assists for r in rounds)
-            output_score = min(1.0, (total_points / max(num_rounds * 15, 1)))
+            output_score = total_points / max(num_rounds * 15, 1)
             summary_text = f"{persona.name} at {config.team} ({config.role}): {total_points}PTS {total_assists}AST, avg {avg_rating:.1f}"
         else:
             total_runs = sum(r.goals for r in rounds)
             total_wickets = sum(r.assists for r in rounds)
-            output_score = min(1.0, (total_runs / max(num_rounds * 30, 1)) + total_wickets * 0.1)
+            output_score = (total_runs / max(num_rounds * 30, 1)) + total_wickets * 0.1
             summary_text = f"{persona.name} at {config.team} ({config.role}): {total_runs}R {total_wickets}W, avg {avg_rating:.1f}"
 
         metrics = {
-            "output_score": float(np.clip(output_score, 0.0, 1.0)),
-            "tactical_fit": float(np.clip(avg_rating / 10.0, 0.0, 1.0)),
+            "output_score": clip_open_unit_interval(output_score),
+            "tactical_fit": clip_open_unit_interval(avg_rating / 10.0),
             "coherence_score": 0.7,
-            "step_efficiency": max(0.0, 1.0 - len(rounds) / (num_rounds * 1.5)),
+            "step_efficiency": clip_open_unit_interval(1.0 - len(rounds) / (num_rounds * 1.5)),
         }
 
         return SimulationResult(

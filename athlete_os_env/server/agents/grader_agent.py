@@ -1,5 +1,8 @@
 """
 GraderAgent — deterministic task graders producing scores in (0, 1) (strict, no 0.0/1.0).
+
+EVERY function that returns a numeric score MUST go through clip_open_unit_interval
+so that no value ever reaches the endpoints 0.0 or 1.0.
 """
 
 from __future__ import annotations
@@ -27,8 +30,8 @@ class GraderAgent:
         if not grader:
             log.warning(f"Unknown task_id: {task_id}")
             return clip_open_unit_interval(0.5)
-        score = grader(data)
-        return clip_open_unit_interval(float(np.clip(score, 0.0, 1.0)))
+        raw = grader(data)
+        return clip_open_unit_interval(float(raw))
 
     # ------------------------------------------------------------------
     # Task 1 — Easy: Single Player Stat Prediction
@@ -50,7 +53,7 @@ class GraderAgent:
 
         reasoning_score = self._grade_reasoning(round_log)
 
-        return min(1.0, base + calibration + 0.2 * reasoning_score)
+        return clip_open_unit_interval(base + calibration + 0.2 * reasoning_score)
 
     # ------------------------------------------------------------------
     # Task 2 — Medium: Player-Team Tactical Fit Analysis
@@ -73,7 +76,7 @@ class GraderAgent:
             score = 0.4 * output_plausibility + 0.4 * tactical_alignment + 0.2 * narrative_coherence
             round_scores.append(score)
 
-        return float(np.mean(round_scores))
+        return clip_open_unit_interval(float(np.mean(round_scores)))
 
     # ------------------------------------------------------------------
     # Task 3 — Hard: Full Squad Recruitment Simulation
@@ -91,10 +94,10 @@ class GraderAgent:
             0.15 * self._grade_tactical_evolution(season_log),
             0.10 * self._grade_individual_dev(season_log),
         ]
-        return float(sum(scores))
+        return clip_open_unit_interval(float(sum(scores)))
 
     # ------------------------------------------------------------------
-    # Sub-graders
+    # Sub-graders — ALL return clip_open_unit_interval(value)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -116,7 +119,7 @@ class GraderAgent:
         goals = round_data.get("goals", 0)
         rating = round_data.get("rating", 6.0)
         if goals > 5:
-            return 0.1  # implausible
+            return 0.1
         if 4.0 <= rating <= 10.0:
             return 0.8
         return 0.4
@@ -130,7 +133,7 @@ class GraderAgent:
             return 0.3
         successful = sum(1 for e in events if e.get("success"))
         ratio = successful / len(events) if events else 0
-        return float(np.clip(ratio, 0.0, 1.0))
+        return clip_open_unit_interval(ratio)
 
     @staticmethod
     def _score_narrative_coherence(round_data: Dict[str, Any]) -> float:
@@ -145,14 +148,14 @@ class GraderAgent:
         total_goals = season_log.get("total_goals", 0)
         matches = season_log.get("matches_played", 1)
         gpg = total_goals / max(matches, 1)
-        return float(np.clip(gpg / 2.0, 0.0, 1.0))
+        return clip_open_unit_interval(gpg / 2.0)
 
     @staticmethod
     def _grade_rotation(season_log: Dict[str, Any]) -> float:
         rotations = season_log.get("rotation_count", 0)
         matches = season_log.get("matches_played", 1)
         ratio = rotations / max(matches, 1)
-        return float(np.clip(ratio / 0.5, 0.0, 1.0))
+        return clip_open_unit_interval(ratio / 0.5)
 
     @staticmethod
     def _grade_injury_mgmt(season_log: Dict[str, Any]) -> float:
@@ -161,18 +164,18 @@ class GraderAgent:
         if injuries == 0:
             return 0.8
         prevention_ratio = rest_decisions / max(injuries, 1)
-        return float(np.clip(prevention_ratio, 0.0, 1.0))
+        return clip_open_unit_interval(prevention_ratio)
 
     @staticmethod
     def _grade_tactical_evolution(season_log: Dict[str, Any]) -> float:
         changes = season_log.get("formation_changes", 0)
         if changes == 0:
             return 0.3
-        return float(np.clip(changes / 3.0, 0.0, 1.0))
+        return clip_open_unit_interval(changes / 3.0)
 
     @staticmethod
     def _grade_individual_dev(season_log: Dict[str, Any]) -> float:
         improvements = season_log.get("player_improvements", 0)
         squad_size = season_log.get("squad_size", 11)
         ratio = improvements / max(squad_size, 1)
-        return float(np.clip(ratio, 0.0, 1.0))
+        return clip_open_unit_interval(ratio)

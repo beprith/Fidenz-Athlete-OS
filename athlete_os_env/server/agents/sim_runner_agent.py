@@ -11,6 +11,7 @@ from models import PlayerPersona, SimulationResult, AthleteState
 from server.simulation.persona_config import SimConfig, persona_to_sim_config
 from server.simulation.simulation_runner import SimulationRunner, run_dual_simulation
 from server.utils.logger import get_logger
+from server.utils.score_bounds import clip_open_unit_interval
 
 log = get_logger("sim_runner_agent")
 
@@ -36,13 +37,13 @@ class SimRunnerAgent:
 
         sport = persona.sport or "soccer"
         if sport == "basketball":
-            output_score = min(1.0, summary.goals / 15.0)
+            output_score = clip_open_unit_interval(summary.goals / 15.0)
             stat_line = f"{summary.goals}PTS {summary.assists}AST"
         elif sport == "cricket":
-            output_score = min(1.0, summary.goals / 30.0 + summary.assists * 0.1)
+            output_score = clip_open_unit_interval(summary.goals / 30.0 + summary.assists * 0.1)
             stat_line = f"{summary.goals}R {summary.assists}W"
         else:
-            output_score = min(1.0, (summary.goals + summary.assists * 0.7) / 1.5)
+            output_score = clip_open_unit_interval((summary.goals + summary.assists * 0.7) / 1.5)
             stat_line = f"{summary.goals}G {summary.assists}A"
 
         result = {
@@ -55,7 +56,7 @@ class SimRunnerAgent:
             },
             "performance_metrics": {
                 "output_score": output_score,
-                "tactical_fit": float(min(1.0, summary.rating / 10.0)),
+                "tactical_fit": clip_open_unit_interval(summary.rating / 10.0),
                 "coherence_score": 0.7,
                 "step_efficiency": 0.6,
             },
