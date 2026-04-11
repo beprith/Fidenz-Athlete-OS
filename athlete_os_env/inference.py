@@ -263,7 +263,10 @@ async def run_task(env: AthleteOSEnv, task_id: str) -> float:
 
             result = await env.step(action)
             obs = result.observation
-            reward = result.reward or 0.0
+            # Clip for [STEP]/[END] logs: values near 0 or 1 must not format as 0.00 or 1.00 at :.2f
+            reward = clip_open_unit_interval(
+                float(result.reward if result.reward is not None else 0.0)
+            )
             done = result.done
             error = obs.last_action_error
 

@@ -1,18 +1,22 @@
 """
 Final task / episode scores must lie strictly in (0, 1) for some submission validators
 (endpoints 0.0 and 1.0 are rejected).
+
+Also: hackathon stdout uses reward:.2f — values like 1e-4 round to "0.00" and 0.9999 to "1.00",
+which parsers treat as out of range. Keep scores in [0.01, 0.99] so 2-decimal formatting stays valid.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-_OPEN_LO = 1e-4
-_OPEN_HI = 1.0 - 1e-4
+# Inclusive inner range; safe for f"{x:.2f}" (never 0.00 or 1.00)
+_OPEN_LO = 0.01
+_OPEN_HI = 0.99
 
 
 def clip_open_unit_interval(x: float) -> float:
-    """Map a real-valued score into (0, 1), excluding 0.0 and 1.0."""
+    """Map a real-valued score into (0, 1), excluding endpoints; 2dp-safe for protocol logs."""
     if x is None:
         return float(0.5 * (_OPEN_LO + _OPEN_HI))
     t = float(x)
