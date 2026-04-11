@@ -26,6 +26,7 @@ from openai import OpenAI
 
 from client import AthleteOSEnv
 from models import AthleteAction, TASK_MAX_STEPS
+from server.utils.score_bounds import clip_open_unit_interval
 
 # ---------------------------------------------------------------------------
 # Environment configuration (Hackathon: defaults via os.getenv second arg)
@@ -282,8 +283,8 @@ async def run_task(env: AthleteOSEnv, task_id: str) -> float:
             if done:
                 break
 
-        score = sum(rewards) / max(len(rewards), 1)
-        score = min(max(score, 0.0), 1.0)
+        raw = sum(rewards) / max(len(rewards), 1)
+        score = clip_open_unit_interval(min(max(raw, 0.0), 1.0))
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     finally:

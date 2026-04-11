@@ -1,5 +1,5 @@
 """
-GraderAgent — deterministic task graders producing 0.0–1.0 scores.
+GraderAgent — deterministic task graders producing scores in (0, 1) (strict, no 0.0/1.0).
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 import numpy as np
 
 from server.utils.logger import get_logger
+from server.utils.score_bounds import clip_open_unit_interval
 
 log = get_logger("grader_agent")
 
@@ -25,9 +26,9 @@ class GraderAgent:
         grader = graders.get(task_id)
         if not grader:
             log.warning(f"Unknown task_id: {task_id}")
-            return 0.0
+            return clip_open_unit_interval(0.5)
         score = grader(data)
-        return float(np.clip(score, 0.0, 1.0))
+        return clip_open_unit_interval(float(np.clip(score, 0.0, 1.0)))
 
     # ------------------------------------------------------------------
     # Task 1 — Easy: Single Player Stat Prediction
@@ -61,7 +62,7 @@ class GraderAgent:
         team_style = data.get("team_style", {})
 
         if not sim_log:
-            return 0.0
+            return clip_open_unit_interval(0.0)
 
         round_scores = []
         for round_data in sim_log:
@@ -81,7 +82,7 @@ class GraderAgent:
     def grade_task3(self, data: Dict[str, Any]) -> float:
         season_log = data.get("season_log", {})
         if not season_log:
-            return 0.0
+            return clip_open_unit_interval(0.0)
 
         scores = [
             0.30 * self._grade_squad_output(season_log),

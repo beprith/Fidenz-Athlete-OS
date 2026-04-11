@@ -212,7 +212,7 @@ The observation provides rich signal at every step: raw match events, aggregated
 | 2 | **Player-Team Tactical Fit** | Medium | 20 | 5-round simulation scored on output plausibility (40%), tactical alignment (40%), narrative coherence (20%) |
 | 3 | **Full Squad Recruitment Sim** | Hard | 50 | 10-match season for 11 players scored on squad output (30%), rotation (25%), injury management (20%), tactical evolution (15%), individual development (10%) |
 
-All graders are **deterministic** and produce scores in **[0.0, 1.0]** with `np.clip`. Task difficulty genuinely escalates — Task 3 challenges even frontier models with multi-player optimization over a season-length horizon.
+All graders are **deterministic** and map scores into **(0, 1)** (strictly; endpoints are avoided for submission validators). Task difficulty genuinely escalates — Task 3 challenges even frontier models with multi-player optimization over a season-length horizon.
 
 ---
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 import numpy as np
 
 from models import AthleteState
+from server.utils.score_bounds import clip_open_unit_interval
 
 
 def _sigmoid(x: float, steepness: float = 6.0, midpoint: float = 0.5) -> float:
@@ -38,7 +39,7 @@ class RewardEngine:
             penalty += self.REPEAT_PENALTY
 
         shaped = _sigmoid(raw + penalty)
-        return float(np.clip(shaped, 0.0, 1.0))
+        return clip_open_unit_interval(float(np.clip(shaped, 0.0, 1.0)))
 
     @staticmethod
     def get_hint(shaped_reward: float) -> str:

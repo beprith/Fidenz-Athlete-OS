@@ -25,6 +25,7 @@ from server.rl.kl_constraint import KLConstraint
 from server.rl.ppo_policy import PPOPolicy
 from server.rl.experience_replay import ExperienceReplay, Transition
 from server.utils.logger import EpisodeLogger, get_logger
+from server.utils.score_bounds import clip_open_unit_interval
 
 log = get_logger("environment")
 
@@ -101,7 +102,7 @@ class AthleteEnvironment(Environment[AthleteObservation, AthleteAction, AthleteS
             graph_context=obs_data.get("graph_context"),
             step_hint="Start by simulating a round with target_context.",
             done=False,
-            reward=0.0,
+            reward=clip_open_unit_interval(0.0),
         )
 
     def step(
@@ -119,7 +120,7 @@ class AthleteEnvironment(Environment[AthleteObservation, AthleteAction, AthleteS
                 last_action_error=sport_error,
                 step_hint="Select a team that matches the player's sport.",
                 done=False,
-                reward=0.0,
+                reward=clip_open_unit_interval(0.0),
             )
 
         self._state.step_count += 1
@@ -138,7 +139,7 @@ class AthleteEnvironment(Environment[AthleteObservation, AthleteAction, AthleteS
                 last_action_error=result["error"],
                 step_hint="Fix the error and try again.",
                 done=False,
-                reward=0.0,
+                reward=clip_open_unit_interval(0.0),
             )
 
         raw_reward = self.reward_engine.compute(result, self._state)
@@ -147,7 +148,7 @@ class AthleteEnvironment(Environment[AthleteObservation, AthleteAction, AthleteS
         baseline = self._state.baseline_persona_vector or [0.5] * 16
         kl_penalty = self.kl_constraint.compute(persona_vector, baseline)
 
-        shaped_reward = max(0.0, raw_reward - kl_penalty)
+        shaped_reward = clip_open_unit_interval(max(0.0, raw_reward - kl_penalty))
         self._state.cumulative_reward += shaped_reward
         self._state.kl_penalty_total += kl_penalty
         self._state.reward = shaped_reward
