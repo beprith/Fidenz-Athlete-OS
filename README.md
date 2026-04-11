@@ -77,6 +77,81 @@ This is not a toy or game — it models a genuine task that recruitment analysts
 
 ---
 
+## Technical implementation
+
+### OpenEnv integration
+
+The package follows the same layout as [reference OpenEnv environments](https://github.com/meta-pytorch/OpenEnv/tree/main/envs): a self-contained **`athlete_os_env/`** root with **`models.py`** (typed `Action` / `Observation` / `State`), **`client.py`** (subclass of `openenv.core.env_client.EnvClient`), **`server/`** (concrete `Environment` + FastAPI), and **`openenv.yaml`** (tasks, `max_steps`, declared env vars). The HTTP/WebSocket surface is produced by **`openenv.core.env_server.create_fastapi_app`**, which registers `/ws`, `/reset`, `/step`, `/state`, `/health`, and JSON-schema routes. Custom dashboard APIs live alongside in `server/app.py` and do not replace the OpenEnv contract. For full mathematical detail (reward sigmoid, KL schedule, graph algorithms), see **[`TECHNICAL_DEEP_DIVE.html`](TECHNICAL_DEEP_DIVE.html)**.
+
+### Session and transport
+
+| Transport | Use case |
+|-----------|----------|
+| **WebSocket `/ws`** | Primary path for agents and `inference.py`: one JSON-RPC-style message stream per session (`type`: `reset` \| `step` \| `state` \| `close`). Each connection gets a **dedicated `AthleteEnvironment` instance** so episodes do not leak across clients. |
+| **HTTP `/reset`, `/step`** | Gym-style compatibility and smoke tests; same environment factory behind the SDK. |
+| **WebSocket `/ws/live`** | Dashboard-only: optional real-time UI events (phase changes, rewards), separate from OpenEnv. |
+
+The baseline client converts `http://` / `https://` base URLs to **`ws://` / `wss://`** and appends `/ws`, matching OpenEnv’s `EnvClient` behavior.
+
+### Episode lifecycle (high level)
+
+```mermaid
+sequenceDiagram
+  participant Agent as Agent / inference.py
+  participant WS as /ws session
+  participant Env as AthleteEnvironment
+  participant Orch as Orchestrator + agents
+  participant Sim as Event engine + simulation
+
+  Agent->>WS: reset(task_id?, seed?)
+  WS->>Env: reset()
+  Env->>Orch: initialize_episode(task_id)
+  Orch-->>Env: observation (goal, player_summary, …)
+  Env-->>Agent: StepResult(observation, reward, done)
+
+  loop Until done or max_steps
+    Agent->>WS: step(action)
+    WS->>Env: step(AthleteAction)
+    Env->>Sim: simulate / validate sport-team match
+    Sim-->>Env: round_result, metrics
+    Env->>Env: reward engine + KL / PPO update
+    Env-->>Agent: StepResult
+  end
+```
+
+### Core server modules
+
+| Area | Path | Responsibility |
+|------|------|------------------|
+| **Environment** | `server/athlete_environment.py` | `reset` / `step` / `state`; task selection; sport validation; wires orchestrator, RL, replay, logging. |
+| **HTTP + static** | `server/app.py` | `create_fastapi_app`, CORS, static `server/static` (Vue build), custom REST + `/ws/live`. |
+| **Swarm** | `server/agents/` | **Orchestrator** routes work; **Persona**, **SimRunner**, **Grader**, **Report**, **Ontology**, **GraphBuilder** implement domain steps. |
+| **GraphRAG** | `server/graphrag/` | In-memory property graph, ontology helpers, **retriever** (BFS + vector similarity). |
+| **RL** | `server/rl/` | **PPO** on persona logits, **KL constraint**, **reward** shaping, **experience replay** for advantage estimates. |
+| **Simulation** | `server/simulation/` | Sport-specific **event engine**, **fatigue**, **simulation_manager** / **simulation_runner** (including dual-context paths). |
+| **Data** | `server/utils/sports_data.py` | Sample players, teams, compatibility helpers for validation and demos. |
+
+### Simulation and reward (runtime path)
+
+1. **Action validation** — e.g. player sport vs target team sport; failures surface in `observation.last_action_error` without crashing the episode.
+2. **Event generation** — discrete events sampled from persona-weighted distributions; different **event vocabularies** per sport (see Multi-Sport table).
+3. **Metrics** — aggregates (tactical fit, output, etc.) feed the shaped reward and grader-facing state.
+4. **RL update** — transitions stored in replay; PPO-style update on the persona vector with **KL penalty** vs baseline to limit drift.
+
+### Frontend and assets
+
+The UI is a **Vue 3 + Vite** SPA under `frontend/`. Production builds emit to `frontend/dist/` and are copied into **`server/static/`** at image build time so FastAPI serves a single origin (no separate CDN). API calls use the same host; OpenEnv sessions use **`/ws`** from the browser via the shared client patterns in `frontend/src/api/`.
+
+### Container image
+
+The **`Dockerfile`** uses a **single** `python:3.11-slim` base: Node/npm from Debian install the frontend, `npm ci && npm run build`, then the tree is copied and `dist` is moved to `server/static`. Python dependencies are installed via **`requirements.txt`**. This avoids pulling a second base image (`node:…`) from Docker Hub, which often breaks automated builds behind restrictive networks. **Port `7860`** is the default for Hugging Face Spaces (`PORT` env).
+
+### Resource expectations
+
+Evaluation targets **2 vCPU / 8 GB RAM**. The stack is CPU-first (NumPy, no GPU training loop); avoid loading huge models inside the **server** process—LLM calls belong in **`inference.py`** with `API_BASE_URL` / `MODEL_NAME` / `HF_TOKEN`.
+
+---
+
 ## Multi-Sport Support
 
 | Sport | Events | Match Length | Stat Metrics | Field Visualization |
@@ -298,7 +373,7 @@ athlete_os_env/
 ├── openenv.yaml              # OpenEnv manifest (3 tasks, env vars)
 ├── pyproject.toml            # Project metadata + [project.scripts] server entry
 ├── requirements.txt          # Python dependencies (includes openenv-core)
-├── Dockerfile                # Multi-stage: Node 20 (frontend) + Python 3.11 (server)
+├── Dockerfile                # Single-stage: python:3.11-slim + Node (npm) for frontend build
 ├── docker-compose.yml        # Local dev compose
 ├── .env.example              # Template for env vars
 ├── .gitignore
@@ -338,7 +413,7 @@ athlete_os_env/
 | **Frontend** | Vue 3, Vite, Tailwind CSS, D3.js, Chart.js, Pinia |
 | **Client** | OpenEnv `EnvClient` (WebSocket), supports `from_docker_image()` |
 | **Inference** | OpenAI client, async, structured `[START]/[STEP]/[END]` stdout |
-| **Deploy** | Docker (multi-stage), Hugging Face Spaces (port 7860) |
+| **Deploy** | Docker (single base image), Hugging Face Spaces (`PORT` / 7860) |
 
 ---
 
