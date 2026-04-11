@@ -1,17 +1,16 @@
 """
 inference.py — Fidenz Athlete OS OpenEnv Baseline Inference Script
 ==================================================================
-MANDATORY:
-  - Environment variables: API_BASE_URL, MODEL_NAME, HF_TOKEN
-  - Uses OpenAI Client for all LLM calls
-  - Emits structured [START], [STEP], [END] stdout logs
-  - Runtime target: < 20 minutes on 2vCPU / 8GB RAM
-  - Each task returns score in [0, 1]
+Meta OpenEnv Hackathon requirements:
+  - OpenAI Client for all LLM calls (no other SDKs / raw HTTP for LLM)
+  - API_BASE_URL, MODEL_NAME with defaults; HF_TOKEN required (no default)
+  - Stdout: only [START] / [STEP] / [END] lines (see log_*); debug -> stderr
+  - Target: < 20 min on 2 vCPU / 8 GB RAM
 
-STDOUT FORMAT:
+STDOUT FORMAT (protocol lines only):
   [START] task=<task_name> env=<benchmark> model=<model_name>
-  [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-  [END]   success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
+  [STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+  [END] success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
 """
 
 import asyncio
@@ -29,13 +28,16 @@ from client import AthleteOSEnv
 from models import AthleteAction, TASK_MAX_STEPS
 
 # ---------------------------------------------------------------------------
-# Environment configuration
+# Environment configuration (Hackathon: defaults via os.getenv second arg)
 # ---------------------------------------------------------------------------
 IMAGE_NAME = os.getenv("IMAGE_NAME")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+if HF_TOKEN is None or not str(HF_TOKEN).strip():
+    raise ValueError("HF_TOKEN environment variable is required")
 
 BENCHMARK = "fidenz_athlete_os"
 MAX_STEPS_OVERRIDE = None
@@ -115,6 +117,7 @@ async def connect_env_client() -> AthleteOSEnv:
                 f"[DEBUG] from_docker_image({IMAGE_NAME!r}) failed ({type(exc).__name__}: {exc}); "
                 "falling back to HTTP/WebSocket URL",
                 flush=True,
+                file=sys.stderr,
             )
             traceback.print_exc(file=sys.stderr)
             return await _connect_via_url(resolve_env_base_url())
@@ -126,7 +129,7 @@ async def _connect_via_url(url: str) -> AthleteOSEnv:
     parsed = urlparse(url)
     if parsed.hostname:
         _merge_no_proxy_for_host(parsed.hostname)
-    print(f"[DEBUG] Connecting to environment at {url}", flush=True)
+    print(f"[DEBUG] Connecting to environment at {url}", flush=True, file=sys.stderr)
     client = AthleteOSEnv(base_url=url)
     await client.connect()
     return client
@@ -140,10 +143,7 @@ SYSTEM_PROMPT = textwrap.dedent("""\
     or {"action_type": "query_persona", "player_id": "<id>", "query": "<question>"}
 """).strip()
 
-if not API_KEY:
-    print("[DEBUG] Warning: No HF_TOKEN or API_KEY set — LLM calls will use fallback actions", flush=True, file=sys.stderr)
-
-llm_client = OpenAI(api_key=API_KEY or "sk-not-configured", base_url=API_BASE_URL)
+llm_client = OpenAI(api_key=HF_TOKEN, base_url=API_BASE_URL)
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +155,11 @@ def log_start(task: str, env: str, model: str) -> None:
 
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    error_val = error if error else "null"
+    # Single-line stdout: strip newlines from error text
+    if error:
+        error_val = error.replace("\n", " ").replace("\r", " ")
+    else:
+        error_val = "null"
     done_val = str(done).lower()
     print(
         f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}",
@@ -163,10 +167,11 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
     )
 
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, rewards: List[float]) -> None:
+    """Hackathon format: [END] has success, steps, rewards only (no score field)."""
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
         flush=True,
     )
 
@@ -216,7 +221,7 @@ def get_model_action(step: int, obs, history: List[str]) -> str:
         )
         return (completion.choices[0].message.content or "").strip()
     except Exception as exc:
-        print(f"[DEBUG] Model request failed: {exc}", flush=True)
+        print(f"[DEBUG] Model request failed: {exc}", flush=True, file=sys.stderr)
         return FALLBACK_ACTION
 
 
@@ -250,7 +255,7 @@ async def run_task(env: AthleteOSEnv, task_id: str) -> float:
                     if k in AthleteAction.model_fields
                 })
             except Exception as exc:
-                print(f"[DEBUG] Invalid action shape, using fallback: {exc}", flush=True)
+                print(f"[DEBUG] Invalid action shape, using fallback: {exc}", flush=True, file=sys.stderr)
                 action = AthleteAction.model_validate_json(FALLBACK_ACTION)
                 action_dict = json.loads(FALLBACK_ACTION)
             action_str = json.dumps(action_dict, separators=(",", ":"))
@@ -282,7 +287,7 @@ async def run_task(env: AthleteOSEnv, task_id: str) -> float:
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     finally:
-        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+        log_end(success=success, steps=steps_taken, rewards=rewards)
 
     return score
 
@@ -301,18 +306,18 @@ async def main() -> None:
             score = await run_task(env, task_id)
             all_scores[task_id] = round(score, 4)
 
-        print(f"[DEBUG] === BASELINE SCORES ===", flush=True)
+        print(f"[DEBUG] === BASELINE SCORES ===", flush=True, file=sys.stderr)
         for task, score in all_scores.items():
-            print(f"[DEBUG]   {task}: {score:.4f}", flush=True)
+            print(f"[DEBUG]   {task}: {score:.4f}", flush=True, file=sys.stderr)
         total = sum(all_scores.values()) / len(all_scores) if all_scores else 0
-        print(f"[DEBUG]   AVERAGE: {total:.4f}", flush=True)
+        print(f"[DEBUG]   AVERAGE: {total:.4f}", flush=True, file=sys.stderr)
 
     finally:
         if env is not None:
             try:
                 await env.close()
             except Exception as exc:
-                print(f"[DEBUG] env.close() failed (ignored): {exc}", flush=True)
+                print(f"[DEBUG] env.close() failed (ignored): {exc}", flush=True, file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -169,7 +169,7 @@ r_t = max(0, R_shaped − β·KL(π_current || π_baseline))
 | `WORKERS` | Uvicorn worker count (default: `1`) | Optional |
 | `MAX_CONCURRENT_ENVS` | Max WebSocket sessions per worker (default: `100`) | Optional |
 
-The server runs without LLM keys — the environment simulation is self-contained. Keys are only needed by the inference script to call the LLM for action generation.
+The server runs without LLM keys — the environment simulation is self-contained. **`inference.py` requires `HF_TOKEN`** (Meta OpenEnv Hackathon rule); it uses the OpenAI client with `API_BASE_URL` and `MODEL_NAME` (both have defaults).
 
 ---
 
@@ -236,7 +236,7 @@ The script emits mandatory structured stdout logs:
 [STEP] step=1 action={"action_type":"simulate_round",...} reward=0.72 done=false error=null
 [STEP] step=2 action={"action_type":"simulate_round",...} reward=0.45 done=false error=null
 ...
-[END] success=true steps=10 score=0.460 rewards=0.72,0.45,...
+[END] success=true steps=10 rewards=0.72,0.45,...
 ```
 
 ---
@@ -273,7 +273,7 @@ The script emits mandatory structured stdout logs:
 
 ## Baseline Scores
 
-Produced by `inference.py` using fallback actions (no LLM):
+Approximate scores from `inference.py` when the model returns invalid JSON or requests fail (fallback action); with a working LLM, scores are typically higher:
 
 | Task | Score | Steps |
 |------|-------|-------|
